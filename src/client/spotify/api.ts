@@ -112,6 +112,7 @@ interface ApiTrack {
   is_local?: boolean
   artists: { name: string }[]
   album?: { images?: { url: string; width?: number }[] }
+  external_ids?: { isrc?: string }
 }
 
 interface ApiPlaylistEntry {
@@ -139,6 +140,7 @@ export async function getPlaylistTracks(id: string): Promise<Track[]> {
       title: t.name,
       artists: t.artists.map((a) => a.name),
       albumImage: (images[1] ?? images[0])?.url,
+      isrc: t.external_ids?.isrc,
     })
   }
   return tracks

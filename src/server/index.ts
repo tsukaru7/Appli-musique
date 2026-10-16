@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { Server, type Socket } from 'socket.io'
 import { buildAnswerOptions } from '../shared/answers.ts'
-import type { AnswerOption, ClientToServerEvents, ServerToClientEvents, Track } from '../shared/protocol.ts'
+import type { AnswerOption, ClientToServerEvents, GameMode, ServerToClientEvents, Track } from '../shared/protocol.ts'
+import { fetchPreview, findPlayableTracks } from './deezer.ts'
 import { Game, type Change } from './game.ts'
 
 const PORT = Number(process.env.PORT ?? 3001)
@@ -19,6 +20,9 @@ interface Room {
   hostSocketId?: string
   options: AnswerOption[]
   lastActivity: number
+  /** Mode Deezer : id Deezer de chaque morceau jouable, et extraits déjà téléchargés. */
+  deezerIds: Map<string, number>
+  previews: Map<number, Promise<Buffer>>
 }
 
 interface SocketData {
@@ -41,6 +45,51 @@ app.get('/api/info', (_req, res) => {
     .map((i) => i!.address)
   res.json({ lanAddresses: addresses })
 })
+
+/** Extrait Deezer de la manche en cours (sans jamais révéler le morceau dans l'adresse). */
+app.get('/api/preview/:code/:round', async (req, res) => {
+  const room = rooms.get(req.params.code)
+  const game = room?.game
+  const deezerId = game?.current ? room?.deezerIds.get(game.current.id) : undefined
+  if (!room || !game || game.phase === 'lobby' || String(game.roundNumber) !== req.params.round || !deezerId) {
+    res.status(404).end()
+    return
+  }
+  let audio: Buffer
+  try {
+    audio = await previewFor(room, deezerId)
+  } catch {
+    res.status(502).end()
+    return
+  }
+  res.set({ 'Content-Type': 'audio/mpeg', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=600' })
+  // Safari demande le fichier par morceaux (« Range ») : il faut savoir y répondre.
+  const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range ?? '')
+  if (!range) {
+    res.set('Content-Length', String(audio.length)).send(audio)
+    return
+  }
+  const start = range[1] ? Number(range[1]) : 0
+  const end = range[2] ? Math.min(Number(range[2]), audio.length - 1) : audio.length - 1
+  if (start > end || start >= audio.length) {
+    res.status(416).set('Content-Range', `bytes */${audio.length}`).end()
+    return
+  }
+  res
+    .status(206)
+    .set({ 'Content-Range': `bytes ${start}-${end}/${audio.length}`, 'Content-Length': String(end - start + 1) })
+    .send(audio.subarray(start, end + 1))
+})
+
+function previewFor(room: Room, deezerId: number): Promise<Buffer> {
+  let audio = room.previews.get(deezerId)
+  if (!audio) {
+    audio = fetchPreview(deezerId)
+    audio.catch(() => room.previews.delete(deezerId))
+    room.previews.set(deezerId, audio)
+  }
+  return audio
+}
 
 if (PRODUCTION) {
   const dist = fileURLToPath(new URL('../../dist', import.meta.url))
@@ -66,9 +115,16 @@ function broadcast(room: Room): void {
 function afterChange(room: Room, change: Change): void {
   broadcast(room)
   const { game } = room
-  if (change.playNext && game.current && room.hostSocketId) {
-    io.to(room.hostSocketId).emit('host:track', { track: game.current, stage: game.stage })
+  if (!change.playNext || !game.current) return
+  if (game.mode === 'spotify') {
+    if (room.hostSocketId) io.to(room.hostSocketId).emit('host:track', { track: game.current, stage: game.stage })
+    return
   }
+  // Mode Deezer : on garde seulement l'extrait de la nouvelle manche, téléchargé à l'avance.
+  const deezerId = room.deezerIds.get(game.current.id)
+  if (deezerId === undefined) return
+  for (const id of room.previews.keys()) if (id !== deezerId) room.previews.delete(id)
+  previewFor(room, deezerId).catch(() => {})
 }
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
@@ -88,21 +144,38 @@ function sanitizeTracks(tracks: unknown): Track[] {
       title: t.title.slice(0, 300),
       artists: Array.isArray(t.artists) ? t.artists.map(String).slice(0, 10) : [],
       albumImage: typeof t.albumImage === 'string' ? t.albumImage : undefined,
+      isrc: typeof t.isrc === 'string' ? t.isrc.slice(0, 20) : undefined,
     }))
     .slice(0, 5000)
 }
 
 io.on('connection', (socket: GameSocket) => {
-  socket.on('host:create', ({ tracks, totalRounds }, ack) => {
+  socket.on('host:create', async ({ tracks, totalRounds, mode }, ack) => {
     const clean = sanitizeTracks(tracks)
     if (clean.length === 0) return ack({ ok: false, error: 'La playlist ne contient aucun morceau jouable.' })
+    const gameMode: GameMode = mode === 'deezer' ? 'deezer' : 'spotify'
+    const rounds = Number(totalRounds) || 10
+
+    let playable = clean
+    let deezerIds = new Map<string, number>()
+    if (gameMode === 'deezer') {
+      // On cherche quelques morceaux de plus que nécessaire, au cas où un extrait serait indisponible.
+      deezerIds = await findPlayableTracks(clean, rounds + 5)
+      playable = clean.filter((t) => deezerIds.has(t.id))
+      if (playable.length === 0) {
+        return ack({ ok: false, error: "Aucun morceau de cette playlist n'a été trouvé sur Deezer." })
+      }
+    }
+
     const code = newCode()
     const room: Room = {
-      game: new Game(code, clean, Number(totalRounds) || 10),
+      game: new Game(code, playable, rounds, { mode: gameMode, answerTracks: clean }),
       hostKey: randomBytes(16).toString('hex'),
       hostSocketId: socket.id,
       options: buildAnswerOptions(clean),
       lastActivity: Date.now(),
+      deezerIds,
+      previews: new Map(),
     }
     rooms.set(code, room)
     socket.data = { code, role: 'host' }
@@ -118,7 +191,7 @@ io.on('connection', (socket: GameSocket) => {
     socket.data = { code, role: 'host' }
     socket.join(code)
     ack({ ok: true })
-    afterChange(room, { playNext: room.game.phase === 'playing' })
+    afterChange(room, { playNext: room.game.phase === 'playing' && room.game.mode === 'spotify' })
   })
 
   socket.on('host:start', () => {

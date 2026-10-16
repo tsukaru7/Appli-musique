@@ -12,7 +12,15 @@ export interface Track {
   title: string
   artists: string[]
   albumImage?: string
+  /** Code international de l'enregistrement : sert à retrouver le morceau sur Deezer. */
+  isrc?: string
 }
+
+/**
+ * - « spotify » : le son sort de l'ordinateur de l'hôte, tout le monde écoute le même extrait.
+ * - « deezer » : chacun écoute sur son téléphone un extrait Deezer, à son rythme.
+ */
+export type GameMode = 'spotify' | 'deezer'
 
 /** Une proposition de réponse affichée dans l'autocomplétion des joueurs. */
 export interface AnswerOption {
@@ -22,7 +30,8 @@ export interface AnswerOption {
 
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'finished'
 
-export type GuessStatus = 'pending' | 'correct' | 'wrong' | 'passed'
+/** « out » : en mode Deezer, le joueur a épuisé tous les extraits sans trouver. */
+export type GuessStatus = 'pending' | 'correct' | 'wrong' | 'passed' | 'out'
 
 export interface PlayerView {
   id: string
@@ -38,11 +47,14 @@ export interface PlayerRoundView {
   /** Palier auquel le joueur a trouvé, s'il a trouvé. */
   foundAtStage?: number
   points: number
+  /** En mode Deezer : palier atteint par ce joueur. */
+  stage: number
 }
 
 /** État de la partie envoyé à tout le monde (sans jamais révéler le morceau avant la fin de la manche). */
 export interface RoomView {
   code: string
+  mode: GameMode
   phase: Phase
   players: PlayerView[]
   totalRounds: number
@@ -55,7 +67,7 @@ export interface RoomView {
 
 export interface ClientToServerEvents {
   'host:create': (
-    payload: { tracks: Track[]; totalRounds: number },
+    payload: { tracks: Track[]; totalRounds: number; mode: GameMode },
     ack: (res: { ok: true; code: string; hostKey: string } | { ok: false; error: string }) => void,
   ) => void
   'host:resume': (payload: { code: string; hostKey: string }, ack: (res: { ok: boolean; error?: string }) => void) => void

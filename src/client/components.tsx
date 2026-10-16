@@ -38,6 +38,7 @@ const STATUS_ICONS: Record<PlayerRoundView['status'], string> = {
   correct: '✅',
   wrong: '❌',
   passed: '⏭️',
+  out: '🏳️',
 }
 
 export function RoundStatusList({ room }: { room: RoomView }) {
@@ -49,6 +50,15 @@ export function RoundStatusList({ room }: { room: RoomView }) {
           <li key={p.id} className={p.connected ? '' : 'offline'}>
             <span className="status">{STATUS_ICONS[r?.status ?? 'pending']}</span>
             <span className="name">{p.name}</span>
+            {room.mode === 'deezer' && (
+              <span className="hint">
+                {r?.status === 'correct'
+                  ? `trouvé à ${SNIPPET_DURATIONS_MS[r.foundAtStage ?? 0] / 1000}s`
+                  : r?.status === 'out'
+                    ? 'abandon'
+                    : `écoute ${SNIPPET_DURATIONS_MS[r?.stage ?? 0] / 1000}s`}
+              </span>
+            )}
             <span className="score">{p.score} pts</span>
           </li>
         )

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { SNIPPET_DURATIONS_MS, type RoomView, type Track } from '../../shared/protocol.ts'
+import { SNIPPET_DURATIONS_MS, type GameMode, type RoomView, type Track } from '../../shared/protocol.ts'
 import { RoundStatusList, Scoreboard, StageBar, TrackCard } from '../components.tsx'
 import { socket } from '../socket.ts'
 import { getMe, getMyPlaylists, getPlaylist, getPlaylistTracks, parsePlaylistId, type PlaylistSummary } from '../spotify/api.ts'
@@ -40,8 +40,12 @@ export function HostApp() {
           Se connecter avec Spotify
         </button>
         <p className="hint">
-          Cette page est celle de l'<strong>hôte</strong> : ouvre-la sur un ordinateur (Chrome, Edge ou Firefox) avec
-          un compte Spotify Premium. Les joueurs rejoindront avec leur téléphone.
+          Cette page est celle de l'<strong>hôte</strong>, qui choisit la playlist. Les joueurs rejoindront avec leur
+          téléphone.
+          <br />
+          Mode Spotify : le son sort de l'ordinateur de l'hôte (Chrome, Edge ou Firefox, compte Premium).
+          <br />
+          Mode Deezer : chacun écoute sur son téléphone, l'hôte peut être sur n'importe quel appareil.
         </p>
       </main>
     )
@@ -65,12 +69,28 @@ function Host({ onLogout }: { onLogout: () => void }) {
   const [current, setCurrent] = useState<{ track: Track; stage: number } | null>(null)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [chosenMode, setChosenMode] = useState<GameMode>(() =>
+    localStorage.getItem('gameMode') === 'spotify' ? 'spotify' : 'deezer',
+  )
+  const mode = room?.mode ?? chosenMode
+  const revealAudio = useRef<HTMLAudioElement | null>(null)
 
-  // Profil Spotify + démarrage du lecteur
+  const chooseMode = (m: GameMode) => {
+    localStorage.setItem('gameMode', m)
+    setChosenMode(m)
+  }
+
   useEffect(() => {
     getMe()
       .then((me) => setUserName(me.display_name ?? me.id))
       .catch((err) => setPlayerError(err.message))
+  }, [])
+
+  // Le lecteur Spotify n'est démarré qu'en mode Spotify (il ne marche pas sur téléphone).
+  const needsSpotifyPlayer = mode === 'spotify'
+  useEffect(() => {
+    if (!needsSpotifyPlayer) return
+    setPlayerError(null)
     let cancelled = false
     let created: SnippetPlayer | null = null
     SnippetPlayer.create((message) => setPlayerError(message))
@@ -83,8 +103,9 @@ function Host({ onLogout }: { onLogout: () => void }) {
     return () => {
       cancelled = true
       created?.disconnect()
+      setPlayer(null)
     }
-  }, [])
+  }, [needsSpotifyPlayer])
 
   // Connexion au serveur de jeu (et reprise de la partie après un rechargement de page)
   useEffect(() => {
@@ -145,17 +166,34 @@ function Host({ onLogout }: { onLogout: () => void }) {
     if (phase === 'finished') player.stop().catch(() => {})
   }, [phase, player, current])
 
+  // Mode Deezer : à la révélation, l'écran de l'hôte joue l'extrait pour tout le monde.
+  const roomCode = room?.code
+  const roundNumber = room?.roundNumber
+  useEffect(() => {
+    if (mode !== 'deezer' || !roomCode) return
+    revealAudio.current ??= new Audio()
+    const audio = revealAudio.current
+    if (phase === 'reveal') {
+      audio.src = `/api/preview/${roomCode}/${roundNumber}`
+      audio.currentTime = 0
+      audio.play().catch(() => {})
+    } else {
+      audio.pause()
+    }
+  }, [mode, phase, roomCode, roundNumber])
+
   const newGame = () => {
     sessionStorage.removeItem(SESSION_KEY)
     setSession(null)
     setRoom(null)
     setCurrent(null)
     player?.stop().catch(() => {})
+    revealAudio.current?.pause()
   }
 
   const createRoom = (tracks: Track[], totalRounds: number) =>
     new Promise<void>((resolve, reject) => {
-      socket.emit('host:create', { tracks, totalRounds }, (res) => {
+      socket.emit('host:create', { tracks, totalRounds, mode: chosenMode }, (res) => {
         if (!res.ok) return reject(new Error(res.error))
         const s = { code: res.code, hostKey: res.hostKey }
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
@@ -169,7 +207,9 @@ function Host({ onLogout }: { onLogout: () => void }) {
       <header className="topbar">
         <span className="logo">🎵 Appli-musique</span>
         <span className="player-status">
-          {playerError ? (
+          {mode === 'deezer' ? (
+            '📱 Mode Deezer : le son sort des téléphones'
+          ) : playerError ? (
             <span className="error">⚠️ {playerError}</span>
           ) : player ? (
             '🔊 Lecteur Spotify prêt'
@@ -186,13 +226,13 @@ function Host({ onLogout }: { onLogout: () => void }) {
       </header>
 
       {!session || !room ? (
-        <PlaylistPicker onCreate={createRoom} />
+        <PlaylistPicker mode={chosenMode} onModeChange={chooseMode} onCreate={createRoom} />
       ) : room.phase === 'lobby' ? (
         <Lobby
           room={room}
-          canStart={player !== null}
+          canStart={mode === 'deezer' || player !== null}
           onStart={async () => {
-            await player?.activate()
+            if (mode === 'spotify') await player?.activate()
             socket.emit('host:start')
           }}
           onCancel={newGame}
@@ -214,7 +254,15 @@ function Host({ onLogout }: { onLogout: () => void }) {
             <span className="code-small">Code : {room.code}</span>
           </div>
 
-          {room.phase === 'playing' ? (
+          {room.phase === 'playing' && room.mode === 'deezer' ? (
+            <>
+              <p className="hint">🎧 Chacun écoute sur son téléphone et avance à son rythme.</p>
+              <RoundStatusList room={room} />
+              <div className="actions">
+                <button onClick={() => socket.emit('host:reveal')}>👀 Révéler maintenant</button>
+              </div>
+            </>
+          ) : room.phase === 'playing' ? (
             <>
               <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
               <div className="actions">
@@ -247,7 +295,28 @@ function Host({ onLogout }: { onLogout: () => void }) {
   )
 }
 
-function PlaylistPicker({ onCreate }: { onCreate: (tracks: Track[], totalRounds: number) => Promise<void> }) {
+const MODES: { id: GameMode; title: string; text: string }[] = [
+  {
+    id: 'deezer',
+    title: '📱 Mode Deezer',
+    text: 'Chacun écoute sur son téléphone et avance à son rythme. Extraits de 30 s fournis par Deezer (aucun compte Deezer nécessaire).',
+  },
+  {
+    id: 'spotify',
+    title: '🔊 Mode Spotify',
+    text: "Le son sort de cet ordinateur et tout le monde écoute le même extrait. Morceaux joués depuis le début. Nécessite un ordinateur et Spotify Premium.",
+  },
+]
+
+function PlaylistPicker({
+  mode,
+  onModeChange,
+  onCreate,
+}: {
+  mode: GameMode
+  onModeChange: (mode: GameMode) => void
+  onCreate: (tracks: Track[], totalRounds: number) => Promise<void>
+}) {
   const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null)
   const [link, setLink] = useState('')
   const [rounds, setRounds] = useState(10)
@@ -266,6 +335,7 @@ function PlaylistPicker({ onCreate }: { onCreate: (tracks: Track[], totalRounds:
     try {
       const tracks = await getPlaylistTracks(id)
       if (tracks.length < 3) throw new Error('Cette playlist contient trop peu de morceaux jouables.')
+      if (mode === 'deezer') setBusy('les extraits sur Deezer (quelques secondes)')
       await onCreate(tracks, rounds)
     } catch (err) {
       setError((err as Error).message)
@@ -288,6 +358,16 @@ function PlaylistPicker({ onCreate }: { onCreate: (tracks: Track[], totalRounds:
 
   return (
     <section className="panel">
+      <h2>Mode de jeu</h2>
+      <div className="mode-picker">
+        {MODES.map((m) => (
+          <button key={m.id} className={`mode ${mode === m.id ? 'selected' : ''}`} onClick={() => onModeChange(m.id)}>
+            <strong>{m.title}</strong>
+            <span>{m.text}</span>
+          </button>
+        ))}
+      </div>
+
       <h2>Choisis une playlist</h2>
 
       <div className="row">
@@ -405,7 +485,12 @@ function Lobby({
             ))}
           </ul>
         )}
-        <p className="hint">{room.totalRounds} manches</p>
+        <p className="hint">
+          {room.totalRounds} manches · {room.mode === 'deezer' ? '📱 mode Deezer' : '🔊 mode Spotify'}
+        </p>
+        {room.mode === 'deezer' && (
+          <p className="hint">🎧 Conseil : des écouteurs pour chacun, sinon tout le monde entend les extraits des autres.</p>
+        )}
         <button className="primary big" disabled={!canStart || room.players.length === 0} onClick={onStart}>
           Lancer la partie
         </button>

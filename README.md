@@ -17,7 +17,21 @@ Projet **privé entre amis**, pas destiné à être publié.
 5. Moins on a eu besoin d'écouter, plus on marque de points.
 6. On enchaîne les manches, puis on affiche le classement.
 
-## 2. Mode principal : « soirée »
+## 2. Deux modes de jeu (au choix de l'hôte)
+
+### 📱 Mode Deezer : chacun sur son téléphone (par défaut)
+
+- L'hôte se connecte à Spotify et choisit la playlist, depuis n'importe quel appareil.
+- Le serveur retrouve les morceaux sur **Deezer** (grâce à leur code ISRC, sinon titre + artiste)
+  et récupère leurs **extraits publics de 30 s** : aucun compte Deezer n'est nécessaire.
+- Chaque joueur écoute l'extrait **sur son téléphone** et avance **à son rythme**, comme dans
+  Songless : une erreur ou « passer » débloque l'extrait plus long. Le joueur qui trouve à 1 s
+  gagne 600 pts, celui qui trouve à 4 s en gagne 400.
+- La manche se termine quand tout le monde a trouvé ou abandonné. L'écran de l'hôte affiche qui
+  en est où, puis joue l'extrait à la révélation.
+- Limite : l'extrait Deezer n'est pas forcément le début du morceau.
+
+### 🔊 Mode Spotify : soirée autour d'un ordinateur
 
 ```
    ┌──────────────────────────┐            ┌──────────────┐
@@ -29,12 +43,14 @@ Projet **privé entre amis**, pas destiné à être publié.
    └──────────────────────────┘            └──────────────┘
 ```
 
-- L'**ordinateur** est l'hôte : il est connecté à Spotify, joue le son et affiche la partie
-  (manche en cours, temps, scores).
-- Chaque joueur rejoint la partie sur **son téléphone** via un code ou un QR code, dans le
-  navigateur, sans rien installer et sans compte Spotify.
-- Les joueurs tapent leur réponse avec une **autocomplétion** sur les titres de la playlist.
-- Aucun titre n'est affiché pendant l'écoute → pas de triche possible.
+- L'**ordinateur** est l'hôte : il est connecté à Spotify (Premium), joue le son depuis le début
+  du morceau et affiche la partie.
+- Tout le monde entend le même extrait : il s'allonge quand tous ceux qui n'ont pas trouvé ont
+  répondu ou passé (une réponse par extrait).
+
+Dans les deux modes, les joueurs rejoignent la partie via un code ou un QR code, dans le
+navigateur, sans rien installer et sans compte. Ils répondent avec une **autocomplétion** sur
+les titres de la playlist.
 
 ## 3. Contraintes imposées par Spotify (à garder en tête)
 
@@ -61,6 +77,7 @@ Projet **privé entre amis**, pas destiné à être publié.
 - [ ] Prototype de validation : précision du lecteur sur des extraits de 1 s
 
 ### Version 2 — Plus de façons de jouer
+- [x] Mode Deezer : chacun écoute sur son téléphone, à son rythme
 - [ ] Son joué sur un appareil Spotify Connect (enceinte, télé, console…) : plus besoin d'ordinateur
 - [ ] Mode solo
 - [ ] Options de partie : nombre de manches, paliers de durée, deviner le titre et/ou l'artiste
@@ -68,7 +85,6 @@ Projet **privé entre amis**, pas destiné à être publié.
 ### Version 3 — Bonus
 - [ ] Défi du jour (même morceau pour tout le monde)
 - [ ] Historique des parties et statistiques par joueur
-- [ ] Mode solo sur téléphone « à l'honnêteté » (le titre s'affiche dans la notification Spotify)
 
 ## 5. Lancer le jeu sur son ordinateur
 
@@ -109,7 +125,7 @@ prend environ une minute.
 | Dossier | Contenu |
 |---|---|
 | `src/shared/` | Types échangés entre serveur et pages, vérification des réponses |
-| `src/server/` | Serveur de jeu temps réel (parties, manches, paliers, points) |
+| `src/server/` | Serveur de jeu temps réel (parties, manches, paliers, points) et extraits Deezer |
 | `src/client/host/` | Page hôte (ordinateur) : connexion Spotify, choix de playlist, lecteur, scores |
 | `src/client/player/` | Page joueur (téléphone) : rejoindre, répondre, scores |
 | `src/client/spotify/` | Connexion, appels à l'API et lecteur d'extraits Spotify |
