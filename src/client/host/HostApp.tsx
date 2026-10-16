@@ -204,7 +204,8 @@ function Host({
   const [room, setRoom] = useState<RoomView | null>(null)
   const [session, setSession] = useState<HostSession | null>(readSession)
   const [current, setCurrent] = useState<{ track: Track; stage: number } | null>(null)
-  const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
+  // Animation de l'extrait en cours, rattachée à sa manche (pour ne pas la rejouer à la manche suivante).
+  const [progressState, setProgress] = useState<{ key: number; ms: number; round?: number } | null>(null)
   const [playing, setPlaying] = useState(false)
   /** Son Spotify : silence à sauter au début du morceau en cours (réglé par l'hôte). */
   const [skipMs, setSkipMs] = useState(0)
@@ -240,6 +241,7 @@ function Host({
           : 'deezer'
   const plannedAudio: AudioSource =
     content === 'packs' || content === 'whois' || chosenMode === 'deezer' ? 'deezer' : 'spotify'
+  const progress = progressState && progressState.round === room?.roundNumber ? progressState : null
   const mode = room?.mode ?? chosenMode
   const audio = room?.audio ?? plannedAudio
   const isSolo = room?.solo ?? setup === 'solo'
@@ -339,6 +341,10 @@ function Host({
   const previewUrl = () => `/api/preview/${roomRef.current?.code}/${roomRef.current?.roundNumber}`
 
   /** Un seul écran : joue l'extrait du palier pour tout le monde (Spotify ou Deezer). */
+  /** Manche où Spotify n'a pas lu le morceau : on joue l'extrait Deezer à la place. */
+  const deezerRoundRef = useRef<number | null>(null)
+  const [deezerFallback, setDeezerFallback] = useState(false)
+
   const playSnippet = useCallback(
     async (track: Track, stage: number) => {
       // « Qui a mis ce son ? » : tout l'extrait (30 s), pas de paliers.
@@ -346,16 +352,30 @@ function Host({
       const onStart = () => {
         // Le son est parti : l'erreur précédente n'a plus lieu d'être.
         setPlayerError(null)
-        setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
+        setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs, round: roomRef.current?.roundNumber }))
         socket.emit('host:snippet', { stage, durationMs })
       }
       setPlaying(true)
       try {
-        if (audioRef.current === 'deezer') {
+        const round = roomRef.current?.roundNumber ?? null
+        if (audioRef.current === 'deezer' || deezerRoundRef.current === round) {
           await preview.play(previewUrl(), durationMs, onStart)
           await sleep(durationMs)
         } else if (player) {
-          await player.playSnippet(track.uri, durationMs, onStart, skipRef.current)
+          try {
+            await player.playSnippet(track.uri, durationMs, onStart, skipRef.current)
+          } catch (err) {
+            // Morceau que Spotify ne lit pas (pas disponible en France, retiré…) : extrait Deezer à la place.
+            setPlayerLog((log) => [...log.slice(-14), `Spotify ne lit pas ce morceau (${(err as Error).message}) : extrait Deezer`])
+            deezerRoundRef.current = round
+            setDeezerFallback(true)
+            try {
+              await preview.play(previewUrl(), durationMs, onStart)
+            } catch {
+              throw new Error("Spotify ne lit pas ce morceau, et il n'a pas été trouvé sur Deezer.")
+            }
+            await sleep(durationMs)
+          }
         }
       } catch (err) {
         setPlayerError((err as Error).message)
@@ -386,6 +406,8 @@ function Host({
   useEffect(() => {
     skipRef.current = 0
     setSkipMs(0)
+    deezerRoundRef.current = null
+    setDeezerFallback(false)
   }, [roundNumber])
 
   /** Le morceau commence par un silence : on décale le départ d'une seconde et on rejoue. */
@@ -402,7 +424,7 @@ function Host({
     if (!roomCode) return
     // « Qui a mis ce son ? » : le morceau continue, on ne le relance pas.
     if (phase === 'reveal' && !isWhois) {
-      if (audio === 'deezer') preview.playFull(previewUrl()).catch(() => {})
+      if (audio === 'deezer' || deezerRoundRef.current === roundNumber) preview.playFull(previewUrl()).catch(() => {})
       else if (player && current) player.playFull(current.track.uri).catch(() => {})
     }
     if (phase === 'finished') {
@@ -650,6 +672,7 @@ function Host({
                       playing={playing}
                       skipMs={skipMs}
                       error={playerError}
+                      fallback={deezerFallback}
                       onReplay={() => current && playSnippet(current.track, room.stage)}
                       onSkipSilence={skipSilence}
                     />
@@ -686,6 +709,7 @@ function Host({
               <>
                 <div className="card">
                   <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
+                  {deezerFallback && <FallbackNotice />}
                   <div className="toolbar">
                     <button
                       className="btn"
@@ -1314,6 +1338,7 @@ function SoloSpotifyRound({
   playing,
   skipMs,
   error,
+  fallback,
   onReplay,
   onSkipSilence,
 }: {
@@ -1324,6 +1349,8 @@ function SoloSpotifyRound({
   playing: boolean
   skipMs: number
   error: string | null
+  /** Spotify ne lit pas ce morceau : c'est l'extrait Deezer qui est joué. */
+  fallback: boolean
   onReplay: () => void
   onSkipSilence: () => void
 }) {
@@ -1342,6 +1369,7 @@ function SoloSpotifyRound({
         progressMs={progress?.ms}
       />
       <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
+      {fallback && !error && <FallbackNotice />}
       {error && mine?.status !== 'correct' && (
         <div className="stack-tight">
           <p className="notice is-bad">Ce morceau ne se lance pas : {error}</p>
@@ -1376,6 +1404,16 @@ function SoloSpotifyRound({
         {skipMs > 0 ? `Départ décalé de ${skipMs / 1000} s · sauter 1 s de plus` : 'Ça commence par un silence ? Sauter 1 s'}
       </button>
     </section>
+  )
+}
+
+/** Spotify n'a pas lu le morceau : on le dit, pour qu'on ne s'étonne pas d'une version un peu différente. */
+function FallbackNotice() {
+  return (
+    <p className="tip">
+      <Icon name="headphones" size={18} />
+      Spotify ne lit pas ce morceau : on écoute l'extrait Deezer à la place.
+    </p>
   )
 }
 

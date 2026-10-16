@@ -268,8 +268,16 @@ app.post('/api/host-check', (req, res) => {
 app.get('/api/preview/:code/:round', async (req, res) => {
   const room = rooms.get(req.params.code)
   const game = room?.game
-  const deezerId = game?.current ? room?.deezerIds.get(game.current.id) : undefined
-  if (!room || !game || game.phase === 'lobby' || String(game.roundNumber) !== req.params.round || !deezerId) {
+  if (!room || !game || !game.current || game.phase === 'lobby' || String(game.roundNumber) !== req.params.round) {
+    res.status(404).end()
+    return
+  }
+  // Son Spotify : si Spotify ne lit pas ce morceau, l'hôte demande l'extrait Deezer à la place.
+  if (game.audio === 'spotify' && !room.deezerIds.has(game.current.id)) {
+    await deezerFallback(room, game.current)
+  }
+  const deezerId = room.deezerIds.get(game.current.id)
+  if (!deezerId) {
     res.status(404).end()
     return
   }
@@ -298,6 +306,26 @@ app.get('/api/preview/:code/:round', async (req, res) => {
     .set({ 'Content-Range': `bytes ${start}-${end}/${audio.length}`, 'Content-Length': String(end - start + 1) })
     .send(audio.subarray(start, end + 1))
 })
+
+/** Recherches en cours du morceau Deezer de secours (une seule par morceau). */
+const fallbackLookups = new Map<string, Promise<void>>()
+
+/** Trouve sur Deezer le même morceau qu'un morceau Spotify (par son code ISRC, sinon titre et artiste). */
+function deezerFallback(room: Room, track: Track): Promise<void> {
+  const key = `${room.game.code}:${track.id}`
+  let lookup = fallbackLookups.get(key)
+  if (!lookup) {
+    lookup = findDeezerTrack(track)
+      .then((match) => {
+        if (match) room.deezerIds.set(track.id, match.id)
+        console.log(`Secours Deezer pour « ${track.title} » : ${match ? match.id : 'introuvable'}`)
+      })
+      .catch(() => {})
+      .finally(() => setTimeout(() => fallbackLookups.delete(key), 60000))
+    fallbackLookups.set(key, lookup)
+  }
+  return lookup
+}
 
 /**
  * Extrait d'un morceau, téléchargé une seule fois. Si Deezer ne le donne pas, on réessaie, puis (blind

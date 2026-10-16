@@ -1,5 +1,5 @@
 // Lecteur Spotify dans le navigateur (Web Playback SDK) : ne fonctionne que sur ordinateur, avec Premium.
-import { spotifyFetch } from './api.ts'
+import { SpotifyError, spotifyFetch } from './api.ts'
 import { getAccessToken } from './auth.ts'
 
 interface PlaybackState {
@@ -156,7 +156,7 @@ export class SnippetPlayer {
     return state
   }
 
-  private async requestPlay(uri: string, positionMs: number): Promise<void> {
+  private async requestPlay(uri: string, positionMs: number, retried = false): Promise<void> {
     try {
       await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
         method: 'PUT',
@@ -165,8 +165,33 @@ export class SnippetPlayer {
       this.log(`Demande de lecture envoyée (${uri})`)
     } catch (err) {
       this.log(`Spotify a refusé la lecture : ${(err as Error).message}`)
+      // 404 : Spotify ne connaît plus ce lecteur (déconnecté en cours de partie) → on le reconnecte.
+      if (!retried && err instanceof SpotifyError && err.status === 404) {
+        await this.reconnect()
+        return this.requestPlay(uri, positionMs, true)
+      }
       throw err
     }
+  }
+
+  /** Reconnecte le lecteur à Spotify (il reçoit alors un nouvel identifiant). */
+  private async reconnect(): Promise<void> {
+    this.log('Lecteur perdu par Spotify : reconnexion…')
+    this.loadedUri = null
+    let onReady: (() => void) | undefined
+    const ready = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 6000)
+      onReady = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      this.player.addListener('ready', onReady)
+    })
+    this.player.disconnect()
+    await this.player.connect()
+    await ready
+    this.player.removeListener('ready', onReady)
+    this.log('Lecteur reconnecté')
   }
 
   /** Coupe le son et vérifie qu'il est vraiment coupé ; sinon on passe par l'API web de Spotify. */
@@ -188,7 +213,7 @@ export class SnippetPlayer {
     await this.player.setVolume(0).catch(() => {})
     try {
       await this.requestPlay(uri, 0)
-      const state = await this.waitPlaying(uri, 6000)
+      const state = await this.waitPlaying(uri, 5000)
       if (!state) throw new Error('le morceau ne démarre pas dans le lecteur')
       this.loadedActual = state.track_window.current_track?.uri ?? null
       await this.forcePause()
@@ -223,8 +248,8 @@ export class SnippetPlayer {
     this.loadedUri = null
     await this.player.setVolume(VOLUME).catch(() => {})
     await this.requestPlay(uri, startMs)
-    const state = await this.waitPlaying(uri, 8000)
-    if (!state) throw new Error('Le lecteur Spotify ne démarre pas. Regarde le journal du lecteur, ou recharge la page.')
+    const state = await this.waitPlaying(uri, 4500)
+    if (!state) throw new Error('Spotify ne lance pas ce morceau.')
     return state
   }
 
