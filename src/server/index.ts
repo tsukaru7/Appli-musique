@@ -17,6 +17,7 @@ import {
   fetchPreview,
   findDeezerTrack,
   findPlayableTracks,
+  getDeezerCountry,
   getDeezerTrack,
   searchTracks,
   type DeezerMatch,
@@ -99,6 +100,11 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string,
  * Configuration publique. En local, on donne aussi les adresses de l'ordinateur sur le Wi-Fi pour que
  * les téléphones puissent le rejoindre (jamais en ligne).
  */
+/** Pays où Deezer voit le serveur : hors de France, certains morceaux peuvent manquer. */
+app.get('/api/deezer-country', async (_req, res) => {
+  res.json({ country: await getDeezerCountry() })
+})
+
 app.get('/api/info', (_req, res) => {
   const lanAddresses = PRODUCTION
     ? []

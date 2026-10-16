@@ -1,5 +1,5 @@
 // Écrans de l'hôte pour « Qui a mis ce son ? ».
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { RoomView } from '../../shared/protocol.ts'
 import { Avatar } from '../avatar.tsx'
 import { Icon, PlayRing, Scoreboard, TrackReveal } from '../components.tsx'
@@ -91,8 +91,38 @@ export function WhoSetup({ onBack, onCreate }: { onBack: () => void; onCreate: (
           </button>
           <span className="muted small">Le son sortira de cet écran : branche une enceinte si tu peux.</span>
         </div>
+        <DeezerCountry />
       </section>
     </div>
+  )
+}
+
+/**
+ * Deezer adapte son catalogue au pays du serveur : on vérifie une fois pour toutes, automatiquement,
+ * qu'il est vu en France (sinon certains morceaux peuvent manquer à la recherche).
+ */
+function DeezerCountry() {
+  const [country, setCountry] = useState<{ iso: string; name: string } | null | undefined>(undefined)
+  useEffect(() => {
+    fetch('/api/deezer-country')
+      .then((r) => r.json())
+      .then((data) => setCountry(data.country ?? null))
+      .catch(() => setCountry(null))
+  }, [])
+  if (country === undefined || country === null) return null
+  if (country.iso === 'FR') {
+    return (
+      <p className="tip">
+        <Icon name="check" size={18} />
+        Catalogue Deezer français, le même que sur vos téléphones.
+      </p>
+    )
+  }
+  return (
+    <p className="notice is-bad">
+      Deezer voit le serveur depuis : {country.name}. Certains morceaux peuvent manquer à la recherche (le catalogue
+      change selon le pays).
+    </p>
   )
 }
 

@@ -163,6 +163,18 @@ export async function getDeezerTrack(id: number): Promise<DeezerMatch | null> {
   return found.id && found.preview ? toMatch(found, 'manual') : null
 }
 
+/** Pays dans lequel Deezer voit le serveur (son catalogue en dépend). Mis en cache une heure. */
+let countryCache: { at: number; value: { iso: string; name: string } | null } | null = null
+export async function getDeezerCountry(): Promise<{ iso: string; name: string } | null> {
+  if (countryCache && Date.now() - countryCache.at < 3600_000) return countryCache.value
+  const info = await deezerGet<{ country_iso?: string; country?: string; error?: DeezerTrack['error'] }>('/infos').catch(
+    () => null,
+  )
+  const value = info?.country_iso ? { iso: info.country_iso, name: info.country ?? info.country_iso } : null
+  countryCache = { at: Date.now(), value }
+  return value
+}
+
 /** Recherche libre (page de vérification des packs). */
 export async function searchTracks(query: string, limit = 15): Promise<DeezerMatch[]> {
   return (await search(query, limit)).map((t) => toMatch(t, 'manual'))
