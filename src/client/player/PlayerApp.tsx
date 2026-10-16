@@ -13,7 +13,7 @@ import {
   seconds,
 } from '../components.tsx'
 import { Avatar } from '../avatar.tsx'
-import { AVATAR_IDS, defaultAvatar, isAvatar } from '../../shared/avatars.ts'
+import { AVATAR_GROUPS, AVATAR_IDS, AVATARS, defaultAvatar, findAvatar, isAvatar } from '../../shared/avatars.ts'
 import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
 
@@ -533,7 +533,8 @@ function JoinScreen({
         }}
       >
         <div className="join-hero">
-          <Avatar id={avatar} size={128} className="avatar-hero" />
+          <Avatar id={avatar} size={128} large className="avatar-hero" />
+          <strong className="avatar-name">{findAvatar(avatar)?.name}</strong>
           <button type="button" className="btn btn-ghost" onClick={random}>
             <Icon name="replay" size={16} />
             Au hasard
@@ -542,18 +543,26 @@ function JoinScreen({
 
         <div className="field">
           <span className="field-label">Choisis ton avatar</span>
-          <div className="avatar-grid" role="radiogroup" aria-label="Avatar">
-            {AVATAR_IDS.map((a) => (
-              <button
-                key={a}
-                type="button"
-                role="radio"
-                aria-checked={a === avatar}
-                className={`avatar-choice ${a === avatar ? 'is-on' : ''}`}
-                onClick={() => onAvatarChange(a)}
-              >
-                <Avatar id={a} size={48} />
-              </button>
+          <div className="avatar-groups" role="radiogroup" aria-label="Avatar">
+            {AVATAR_GROUPS.map((group) => (
+              <div key={group} className="avatar-group">
+                <span className="avatar-group-title">{group}</span>
+                <div className="avatar-grid">
+                  {AVATARS.filter((a) => a.group === group).map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={a.id === avatar}
+                      aria-label={a.name}
+                      className={`avatar-choice ${a.id === avatar ? 'is-on' : ''}`}
+                      onClick={() => onAvatarChange(a.id)}
+                    >
+                      <Avatar id={a.id} size={52} />
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

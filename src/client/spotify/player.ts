@@ -70,6 +70,15 @@ export class SnippetPlayer {
   private playId = 0
   /** Morceau chargé dans le lecteur (en pause au début, prêt à être joué). */
   private loadedUri: string | null = null
+  /** Identifiant réellement joué par Spotify (il peut différer : autre version du même morceau). */
+  private loadedActual: string | null = null
+  /** Journal des étapes de lecture, affiché à l'hôte pour comprendre un problème de son. */
+  onLog?: (line: string) => void
+
+  private log(line: string): void {
+    const time = new Date().toLocaleTimeString('fr-FR')
+    this.onLog?.(`${time} · ${line}`)
+  }
 
   private constructor(
     private readonly player: SdkPlayer,
@@ -124,7 +133,40 @@ export class SnippetPlayer {
 
   private isPlaying(state: PlaybackState, uri: string): boolean {
     const track = state.track_window.current_track
-    return !state.paused && track !== null && (track.uri === uri || track.linked_from?.uri === uri)
+    return (
+      !state.paused &&
+      track !== null &&
+      (track.uri === uri || track.linked_from?.uri === uri || track.uri === this.loadedActual)
+    )
+  }
+
+  /**
+   * Attend que le morceau demandé joue. Spotify remplace parfois un morceau par une autre version
+   * (autre album, autre pays) avec un autre identifiant : passé 2,5 s, on accepte tout morceau qui joue.
+   */
+  private async waitPlaying(uri: string, timeoutMs: number): Promise<PlaybackState | null> {
+    const start = performance.now()
+    const state = await this.waitFor(
+      (s) => this.isPlaying(s, uri) || (performance.now() - start > 2500 && !s.paused && s.track_window.current_track !== null),
+      timeoutMs,
+    )
+    if (state && state.track_window.current_track?.uri !== uri) {
+      this.log(`Spotify joue une autre version (${state.track_window.current_track?.uri})`)
+    }
+    return state
+  }
+
+  private async requestPlay(uri: string, positionMs: number): Promise<void> {
+    try {
+      await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ uris: [uri], position_ms: positionMs }),
+      })
+      this.log(`Demande de lecture envoyée (${uri})`)
+    } catch (err) {
+      this.log(`Spotify a refusé la lecture : ${(err as Error).message}`)
+      throw err
+    }
   }
 
   /** Coupe le son et vérifie qu'il est vraiment coupé ; sinon on passe par l'API web de Spotify. */
@@ -142,18 +184,17 @@ export class SnippetPlayer {
    */
   private async prepare(uri: string): Promise<void> {
     this.loadedUri = null
+    this.loadedActual = null
     await this.player.setVolume(0).catch(() => {})
     try {
-      await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ uris: [uri], position_ms: 0 }),
-      })
-      if (!(await this.waitFor((s) => this.isPlaying(s, uri), 6000))) {
-        throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
-      }
+      await this.requestPlay(uri, 0)
+      const state = await this.waitPlaying(uri, 6000)
+      if (!state) throw new Error('le morceau ne démarre pas dans le lecteur')
+      this.loadedActual = state.track_window.current_track?.uri ?? null
       await this.forcePause()
       await this.player.seek(0)
       this.loadedUri = uri
+      this.log('Morceau chargé')
     } finally {
       await this.player.setVolume(VOLUME).catch(() => {})
     }
@@ -166,14 +207,25 @@ export class SnippetPlayer {
   private async resumeFromBeginning(uri: string, startMs = 0): Promise<PlaybackState> {
     const state = await this.player.getCurrentState()
     const loaded = state?.track_window.current_track
-    if (this.loadedUri !== uri || !loaded || (loaded.uri !== uri && loaded.linked_from?.uri !== uri)) {
-      await this.prepare(uri)
-    }
+    const stillLoaded =
+      this.loadedUri === uri && loaded && (loaded.uri === uri || loaded.uri === this.loadedActual || loaded.linked_from?.uri === uri)
+    if (!stillLoaded) await this.prepare(uri)
+    await this.player.setVolume(VOLUME).catch(() => {})
     await this.player.seek(startMs)
     await this.player.resume()
-    const playing = await this.waitFor((s) => this.isPlaying(s, uri), 6000)
-    if (!playing) throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
+    const playing = await this.waitPlaying(uri, 4000)
+    if (!playing) throw new Error('la reprise de lecture ne répond pas')
     return playing
+  }
+
+  /** Méthode de secours, la plus simple : on demande à Spotify de jouer le morceau à la bonne position. */
+  private async playDirect(uri: string, startMs: number): Promise<PlaybackState> {
+    this.loadedUri = null
+    await this.player.setVolume(VOLUME).catch(() => {})
+    await this.requestPlay(uri, startMs)
+    const state = await this.waitPlaying(uri, 8000)
+    if (!state) throw new Error('Le lecteur Spotify ne démarre pas. Regarde le journal du lecteur, ou recharge la page.')
+    return state
   }
 
   /**
@@ -189,8 +241,15 @@ export class SnippetPlayer {
     }, durationMs + 12000)
     try {
       await this.player.pause().catch(() => {})
-      const state = await this.resumeFromBeginning(uri, startMs)
+      let state: PlaybackState
+      try {
+        state = await this.resumeFromBeginning(uri, startMs)
+      } catch (err) {
+        this.log(`Lecture normale impossible (${(err as Error).message}) : méthode de secours`)
+        state = await this.playDirect(uri, startMs)
+      }
       if (id !== this.playId) return
+      this.log(`Extrait de ${durationMs / 1000} s en cours`)
       onStart?.()
       // Temps déjà joué au moment où on a lu l'état du lecteur.
       // (on ignore la valeur si elle n'a pas l'air d'être un horodatage récent)
@@ -209,7 +268,11 @@ export class SnippetPlayer {
   /** Révélation : on laisse le morceau tourner depuis le début. */
   async playFull(uri: string): Promise<void> {
     this.playId++
-    await this.resumeFromBeginning(uri)
+    try {
+      await this.resumeFromBeginning(uri)
+    } catch {
+      await this.playDirect(uri, 0)
+    }
   }
 
   async stop(): Promise<void> {

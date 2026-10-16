@@ -195,6 +195,10 @@ function Host({
   const [userName, setUserName] = useState<string | null>(null)
   const [player, setPlayer] = useState<SnippetPlayer | null>(null)
   const [playerError, setPlayerError] = useState<string | null>(null)
+  /** Journal du lecteur Spotify (pour comprendre un problème de son). */
+  const [playerLog, setPlayerLog] = useState<string[]>([])
+  /** Un morceau de la playlist, pour le bouton « Tester le son ». */
+  const [testUri, setTestUri] = useState<string | null>(null)
   const [room, setRoom] = useState<RoomView | null>(null)
   const [session, setSession] = useState<HostSession | null>(readSession)
   const [current, setCurrent] = useState<{ track: Track; stage: number } | null>(null)
@@ -279,6 +283,7 @@ function Host({
       .then((p) => {
         if (cancelled) return p.disconnect()
         created = p
+        p.onLog = (line) => setPlayerLog((log) => [...log.slice(-14), line])
         setPlayer(p)
       })
       .catch((err) => !cancelled && setPlayerError(err.message))
@@ -405,6 +410,8 @@ function Host({
 
   const createRoom = (source: { tracks?: Track[]; packs?: string[] }, totalRounds: number) =>
     new Promise<void>((resolve, reject) => {
+      const tracks = source.tracks ?? []
+      setTestUri(tracks.length > 0 ? tracks[Math.floor(Math.random() * tracks.length)].uri : null)
       socket.emit('host:create', { ...source, totalRounds, mode: chosenMode, solo: setup === 'solo', password }, (res) => {
         if (!res.ok) {
           if (res.error.includes('Mot de passe')) onBadPassword()
@@ -534,6 +541,19 @@ function Host({
           <Lobby
             room={room}
             musicLabel={musicLabel}
+            soundCheck={
+              audio === 'spotify' && player && testUri ? (
+                <SoundCheck
+                  log={playerLog}
+                  error={playerError}
+                  onTest={async () => {
+                    setPlayerError(null)
+                    await player.activate()
+                    player.playSnippet(testUri, 3000).catch((err) => setPlayerError((err as Error).message))
+                  }}
+                />
+              ) : null
+            }
             canStart={audio === 'deezer' || player !== null}
             onStart={async () => {
               if (audio === 'spotify') await player?.activate()
@@ -644,6 +664,9 @@ function Host({
                       Révéler
                     </button>
                   </div>
+                  {room.audio === 'spotify' && (
+                    <PlayerLog log={playerLog} error={playerError} />
+                  )}
                   {room.audio === 'spotify' && (
                     <div className="silence">
                       <span className="muted small">
@@ -1092,12 +1115,14 @@ function useJoinUrl(code: string): string | null {
 function Lobby({
   room,
   musicLabel,
+  soundCheck,
   canStart,
   onStart,
   onCancel,
 }: {
   room: RoomView
   musicLabel: string
+  soundCheck: ReactNode
   canStart: boolean
   onStart: () => void
   onCancel: () => void
@@ -1154,6 +1179,7 @@ function Lobby({
             Dans la même pièce, mieux vaut des écouteurs : sinon chacun entend les extraits des autres.
           </p>
         )}
+        {soundCheck}
         <div className="stack">
           <button className="btn btn-primary btn-lg" disabled={!canStart || room.players.length === 0} onClick={onStart}>
             Lancer la partie
@@ -1257,5 +1283,33 @@ function SoloSpotifyRound({
         {skipMs > 0 ? `Départ décalé de ${skipMs / 1000} s · sauter 1 s de plus` : 'Ça commence par un silence ? Sauter 1 s'}
       </button>
     </section>
+  )
+}
+
+/** Journal du lecteur Spotify, replié par défaut (ouvert s'il y a une erreur). */
+function PlayerLog({ log, error }: { log: string[]; error: string | null }) {
+  if (log.length === 0 && !error) return null
+  return (
+    <details className="player-log" open={error !== null}>
+      <summary>Journal du lecteur</summary>
+      {error && <p className="notice is-bad">{error}</p>}
+      <pre>{log.join('\n') || 'Rien pour l’instant.'}</pre>
+    </details>
+  )
+}
+
+/** Avant de lancer : vérifier que le son Spotify sort bien de cet ordinateur. */
+function SoundCheck({ log, error, onTest }: { log: string[]; error: string | null; onTest: () => void }) {
+  return (
+    <div className="sound-check">
+      <div className="sound-check-head">
+        <span className="muted small">Le son sort de cet ordinateur. Vérifie-le avant de lancer :</span>
+        <button className="btn" onClick={onTest}>
+          <Icon name="speaker" size={16} />
+          Tester le son
+        </button>
+      </div>
+      <PlayerLog log={log} error={error} />
+    </div>
   )
 }

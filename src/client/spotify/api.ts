@@ -32,8 +32,7 @@ export async function spotifyFetch<T>(path: string, init: RequestInit = {}): Pro
       // réponse sans contenu JSON
     }
     if (res.status === 403) {
-      message =
-        "Spotify refuse l'accès. Vérifie que ce compte est bien ajouté dans « User Management » du tableau de bord développeur, et qu'il est Premium."
+      message = `Spotify refuse l'accès (${message}). Vérifie que ce compte est bien ajouté dans « User Management » du tableau de bord développeur, et qu'il est Premium.`
     }
     throw new SpotifyError(res.status, message)
   }

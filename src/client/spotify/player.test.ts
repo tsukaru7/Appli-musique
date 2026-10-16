@@ -28,10 +28,13 @@ class FakePlayer {
     if (!this.paused && this.volume > 0 && this.uri) this.heard.add(this.uri)
   }, 5)
 
+  /** Simule Spotify qui joue une autre version du morceau, sous un autre identifiant. */
+  relink = false
+
   startPlaying(uri: string) {
     if (this.uri) this.paused = false
     setTimeout(() => {
-      this.uri = uri
+      this.uri = this.relink ? `${uri}-autre-version` : uri
       this.paused = false
       this.startedAt = Date.now()
     }, 200)
@@ -154,4 +157,16 @@ describe('SnippetPlayer', () => {
     expect(fake.pauses.at(-1)).toBeGreaterThanOrEqual(3950)
     expect(fake.pauses.at(-1)).toBeLessThan(4150)
   })
+
+  it('joue quand même si Spotify remplace le morceau par une autre version', async () => {
+    const player = await newPlayer()
+    fake.relink = true
+    await player.playSnippet('spotify:track:x', 1000)
+    expect(fake.pauses.at(-1)).toBeGreaterThanOrEqual(950)
+    expect(fake.pauses.at(-1)).toBeLessThan(1200)
+    // Le deuxième extrait du même morceau repart sans recharger.
+    apiCalls.length = 0
+    await player.playSnippet('spotify:track:x', 500)
+    expect(apiCalls.filter((p) => p.startsWith('/me/player/play'))).toHaveLength(0)
+  }, 15000)
 })
