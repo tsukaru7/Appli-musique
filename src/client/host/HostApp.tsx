@@ -344,6 +344,8 @@ function Host({
       // « Qui a mis ce son ? » : tout l'extrait (30 s), pas de paliers.
       const durationMs = whoisRef.current ? WHO_LISTEN_MS : SNIPPET_DURATIONS_MS[stage]
       const onStart = () => {
+        // Le son est parti : l'erreur précédente n'a plus lieu d'être.
+        setPlayerError(null)
         setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
         socket.emit('host:snippet', { stage, durationMs })
       }
@@ -442,7 +444,9 @@ function Host({
     })
 
   const status =
-    audio === 'deezer'
+    audio === 'deezer' && playerError
+      ? { tone: 'bad', text: playerError }
+      : audio === 'deezer'
       ? { tone: 'neutral', text: mode === 'deezer' && !isSolo ? 'Son sur les téléphones' : 'Son sur cet écran' }
       : !loggedIn
         ? { tone: 'neutral', text: 'Spotify non connecté' }
@@ -645,6 +649,7 @@ function Host({
                       progress={progress}
                       playing={playing}
                       skipMs={skipMs}
+                      error={playerError}
                       onReplay={() => current && playSnippet(current.track, room.stage)}
                       onSkipSilence={skipSilence}
                     />
@@ -1308,6 +1313,7 @@ function SoloSpotifyRound({
   progress,
   playing,
   skipMs,
+  error,
   onReplay,
   onSkipSilence,
 }: {
@@ -1317,6 +1323,7 @@ function SoloSpotifyRound({
   progress: { key: number; ms: number } | null
   playing: boolean
   skipMs: number
+  error: string | null
   onReplay: () => void
   onSkipSilence: () => void
 }) {
@@ -1335,6 +1342,26 @@ function SoloSpotifyRound({
         progressMs={progress?.ms}
       />
       <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
+      {error && mine?.status !== 'correct' && (
+        <div className="stack-tight">
+          <p className="notice is-bad">Ce morceau ne se lance pas : {error}</p>
+          <div className="toolbar">
+            <button className="btn" disabled={playing} onClick={onReplay}>
+              <Icon name="replay" size={18} />
+              Réessayer
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                for (let s = room.stage; s <= LAST_STAGE; s++) playerSocket.emit('player:pass')
+              }}
+            >
+              <Icon name="skip" size={18} />
+              Passer ce morceau
+            </button>
+          </div>
+        </div>
+      )}
       {mine?.status !== 'correct' && (
         <>
           <GuessInput options={options} roundNumber={room.roundNumber} works={room.packs.length > 0} />

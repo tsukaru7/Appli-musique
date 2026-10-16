@@ -275,7 +275,7 @@ app.get('/api/preview/:code/:round', async (req, res) => {
   }
   let audio: Buffer
   try {
-    audio = await previewFor(room, deezerId)
+    audio = await previewFor(room, deezerId, game.current)
   } catch {
     res.status(502).end()
     return
@@ -299,15 +299,38 @@ app.get('/api/preview/:code/:round', async (req, res) => {
     .send(audio.subarray(start, end + 1))
 })
 
-function previewFor(room: Room, deezerId: number): Promise<Buffer> {
+/**
+ * Extrait d'un morceau, téléchargé une seule fois. Si Deezer ne le donne pas, on réessaie, puis (blind
+ * test) on cherche une autre version du même morceau plutôt que de bloquer la manche.
+ */
+function previewFor(room: Room, deezerId: number, track?: Track): Promise<Buffer> {
   let audio = room.previews.get(deezerId)
   if (!audio) {
-    audio = fetchPreview(deezerId)
+    audio = (async () => {
+      try {
+        return await fetchPreview(deezerId)
+      } catch {
+        await sleep(800)
+      }
+      try {
+        return await fetchPreview(deezerId)
+      } catch (err) {
+        // « Qui a mis ce son ? » : c'est ce morceau-là que le joueur a choisi, on n'en prend pas un autre.
+        if (!track || room.game instanceof WhoGame) throw err
+        const other = await findDeezerTrack({ ...track, deezerId: undefined }).catch(() => null)
+        if (!other || other.id === deezerId) throw err
+        console.log(`Extrait ${deezerId} indisponible pour « ${track.title} » : autre version ${other.id}`)
+        room.deezerIds.set(track.id, other.id)
+        return fetchPreview(other.id)
+      }
+    })()
     audio.catch(() => room.previews.delete(deezerId))
     room.previews.set(deezerId, audio)
   }
   return audio
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 if (PRODUCTION) {
   const dist = fileURLToPath(new URL('../../dist', import.meta.url))
@@ -353,7 +376,7 @@ function afterChange(room: Room, change: Change): void {
   const deezerId = room.deezerIds.get(game.current.id)
   if (deezerId === undefined) return
   for (const id of room.previews.keys()) if (id !== deezerId) room.previews.delete(id)
-  previewFor(room, deezerId).catch(() => {})
+  previewFor(room, deezerId, game.current).catch(() => {})
 }
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>

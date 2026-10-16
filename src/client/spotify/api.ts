@@ -109,6 +109,8 @@ interface ApiTrack {
   uri: string
   name: string
   is_local?: boolean
+  /** Donné quand on précise le pays : faux pour un morceau grisé (pas lisible dans ce pays). */
+  is_playable?: boolean
   artists: { name: string }[]
   album?: { images?: { url: string; width?: number }[] }
   external_ids?: { isrc?: string }
@@ -123,15 +125,18 @@ interface ApiPlaylistEntry {
 export async function getPlaylistTracks(id: string): Promise<Track[]> {
   let entries: ApiPlaylistEntry[]
   try {
-    entries = await fetchAll<ApiPlaylistEntry>(`/playlists/${id}/items?limit=50&additional_types=track`)
+    // « market=from_token » : Spotify dit quels morceaux sont lisibles dans le pays du compte.
+    entries = await fetchAll<ApiPlaylistEntry>(`/playlists/${id}/items?limit=50&additional_types=track&market=from_token`)
   } catch (err) {
     if (!(err instanceof SpotifyError) || err.status !== 404) throw err
-    entries = await fetchAll<ApiPlaylistEntry>(`/playlists/${id}/tracks?limit=50&additional_types=track`)
+    entries = await fetchAll<ApiPlaylistEntry>(`/playlists/${id}/tracks?limit=50&additional_types=track&market=from_token`)
   }
   const tracks: Track[] = []
   for (const entry of entries) {
     const t = entry.item ?? entry.track
     if (!t || !t.id || t.is_local || (t.type && t.type !== 'track')) continue
+    // Morceau grisé dans Spotify : il ne se lancerait jamais.
+    if (t.is_playable === false) continue
     const images = t.album?.images ?? []
     tracks.push({
       id: t.id,

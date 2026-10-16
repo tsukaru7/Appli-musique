@@ -222,7 +222,8 @@ export async function findPlayableTracks(
 export async function fetchPreview(deezerId: number): Promise<Buffer> {
   const track = await deezerGet<DeezerTrack>(`/track/${deezerId}`)
   if (!track.preview) throw new Error('Extrait indisponible')
-  const res = await fetch(track.preview)
+  // Un téléchargement coincé bloquerait la manche pour tout le monde : on abandonne au bout de 15 s.
+  const res = await fetch(track.preview, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) throw new Error(`Extrait indisponible (${res.status})`)
   return Buffer.from(await res.arrayBuffer())
 }

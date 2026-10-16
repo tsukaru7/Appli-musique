@@ -448,17 +448,30 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
   const lastStage = SNIPPET_DURATIONS_MS.length - 1
 
   // On télécharge l'extrait dès le début de la manche (et on repère où le son commence).
+  const [loadTry, setLoadTry] = useState(0)
+  const [loadFailed, setLoadFailed] = useState(false)
   useEffect(() => {
     let cancelled = false
     setReady(false)
+    setLoadFailed(false)
+    setError(null)
     preview.load(src).then(
       () => !cancelled && setReady(true),
-      () => !cancelled && setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant."),
+      () => {
+        if (cancelled) return
+        setLoadFailed(true)
+        setError("Ce morceau ne se charge pas. Réessaie, ou passe au suivant.")
+      },
     )
     return () => {
       cancelled = true
     }
-  }, [preview, src])
+  }, [preview, src, loadTry])
+
+  /** Morceau impossible à charger : on abandonne la manche pour passer à la suite. */
+  const skipTrack = () => {
+    for (let s = stage; s <= SNIPPET_DURATIONS_MS.length - 1; s++) socket.emit('player:pass')
+  }
 
   useEffect(() => () => preview.dispose(), [preview])
 
@@ -524,6 +537,18 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
           />
           <StageBar stage={stage} progressKey={progress?.key} progressMs={progress?.ms} />
           {error && <p className="notice is-bad">{error}</p>}
+          {loadFailed && (
+            <div className="toolbar">
+              <button className="btn" onClick={() => setLoadTry((n) => n + 1)}>
+                <Icon name="replay" size={18} />
+                Réessayer
+              </button>
+              <button className="btn btn-ghost" onClick={skipTrack}>
+                <Icon name="skip" size={18} />
+                Passer ce morceau
+              </button>
+            </div>
+          )}
           <GuessInput options={options} roundNumber={room.roundNumber} works={room.packs.length > 0} />
           <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
             <Icon name="skip" size={18} />

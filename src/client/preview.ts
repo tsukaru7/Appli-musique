@@ -1,6 +1,20 @@
 // Lecture des extraits Deezer (servis par notre serveur) : début du son repéré, coupure précise.
 import { detectSoundStart } from './audio.ts'
 
+/** Télécharge l'extrait (25 s maximum par essai), avec un second essai si le premier échoue. */
+async function download(url: string): Promise<ArrayBuffer> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(25000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return await res.arrayBuffer()
+    } catch {
+      if (attempt >= 1) throw new Error("Cet extrait n'a pas pu être chargé.")
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+}
+
 export class PreviewPlayer {
   private readonly audio = new Audio()
   private url: string | null = null
@@ -21,9 +35,7 @@ export class PreviewPlayer {
     this.url = url
     this.soundStart = 0
     this.loading = (async () => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Cet extrait n'a pas pu être chargé.")
-      const data = await res.arrayBuffer()
+      const data = await download(url)
       const start = await detectSoundStart(data.slice(0))
       if (this.url !== url) return
       if (this.blobUrl) URL.revokeObjectURL(this.blobUrl)
