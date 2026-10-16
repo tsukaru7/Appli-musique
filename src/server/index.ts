@@ -569,34 +569,48 @@ io.on('connection', (socket: GameSocket) => {
     if (!room || role !== 'player' || !playerId || !(room.game instanceof WhoGame)) return null
     return { room, game: room.game, playerId }
   }
+  /** Réponse quand le joueur n'est plus rattaché à une partie (connexion perdue puis reprise). */
+  const NOT_IN_GAME = "Tu n'es plus connecté à la partie : recharge la page."
+  // Recherches d'un joueur : une à la fois, au plus une toutes les 300 ms (les suivantes attendent).
+  let searchQueue: Promise<unknown> = Promise.resolve()
   let lastSearch = 0
 
-  socket.on('whois:search', async ({ query }, ack) => {
-    if (!whoContext() || typeof ack !== 'function') return
+  socket.on('whois:search', ({ query }, ack) => {
+    if (typeof ack !== 'function') return
+    if (!whoContext()) return ack({ results: [], error: NOT_IN_GAME })
     const q = String(query ?? '').trim().slice(0, 120)
-    // Pas plus d'une recherche toutes les 400 ms par joueur.
-    if (!q || Date.now() - lastSearch < 400) return ack([])
-    lastSearch = Date.now()
-    const results = await searchTracks(q).catch(() => [])
-    ack(
-      results.map((m) => ({
-        deezerId: m.id,
-        title: m.title,
-        artist: m.artist,
-        album: m.album,
-        cover: m.cover,
-        preview: m.preview,
-      })),
-    )
+    if (!q) return ack({ results: [] })
+    const run = async () => {
+      const wait = lastSearch + 300 - Date.now()
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+      lastSearch = Date.now()
+      try {
+        const found = await searchTracks(q, 25)
+        ack({
+          results: found.map((m) => ({
+            deezerId: m.id,
+            title: m.title,
+            artist: m.artist,
+            album: m.album,
+            cover: m.cover,
+            preview: m.preview,
+          })),
+        })
+      } catch {
+        ack({ results: [], error: 'Deezer ne répond pas, réessaie dans un instant.' })
+      }
+    }
+    searchQueue = searchQueue.then(run, run)
   })
 
   socket.on('whois:add', async ({ deezerId }, ack) => {
+    if (typeof ack !== 'function') return
     const ctx = whoContext()
-    if (!ctx || typeof ack !== 'function') return
+    if (!ctx) return ack({ ok: false, error: NOT_IN_GAME })
     const id = Number(deezerId)
     if (!Number.isInteger(id)) return ack({ ok: false, error: 'Morceau invalide.' })
     const match = await getDeezerTrack(id).catch(() => null)
-    if (!match) return ack({ ok: false, error: "Ce morceau n'a pas d'extrait sur Deezer, choisis-en un autre." })
+    if (!match) return ack({ ok: false, error: "Deezer n'a pas répondu pour ce morceau : réessaie, ou choisis-en un autre." })
     const track: Track = {
       id: `qui:${match.id}`,
       uri: '',
@@ -607,7 +621,7 @@ io.on('connection', (socket: GameSocket) => {
     const res = ctx.game.add(ctx.playerId, track)
     if (!res.ok) return ack(res)
     ctx.room.deezerIds.set(track.id, match.id)
-    ack({ ok: true })
+    ack({ ok: true, tracks: ctx.game.mine(ctx.playerId) })
     socket.emit('whois:mine', { tracks: ctx.game.mine(ctx.playerId) })
     broadcast(ctx.room)
   })

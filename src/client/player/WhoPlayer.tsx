@@ -7,7 +7,7 @@ import { socket } from '../socket.ts'
 import { WhoOwner } from '../host/WhoHost.tsx'
 
 /** Morceaux choisis par ce joueur (le serveur les renvoie à chaque changement). */
-export function useMine(): Track[] {
+export function useMine(): [Track[], (tracks: Track[]) => void] {
   const [mine, setMine] = useState<Track[]>([])
   useEffect(() => {
     const onMine = ({ tracks }: { tracks: Track[] }) => setMine(tracks)
@@ -16,7 +16,7 @@ export function useMine(): Track[] {
       socket.off('whois:mine', onMine)
     }
   }, [])
-  return mine
+  return [mine, setMine]
 }
 
 /** Numéro de la manche dont le morceau est le mien (s'il y en a une). */
@@ -65,60 +65,109 @@ function usePreview() {
   return { playing, toggle, stop }
 }
 
+/** Délai au-delà duquel on considère que le serveur n'a pas répondu. */
+const ADD_TIMEOUT_MS = 12000
+const SEARCH_TIMEOUT_MS = 15000
+
 /** Salle d'attente : on choisit ses morceaux en secret. */
-export function WhoLobby({ room, playerId, mine }: { room: RoomView; playerId: string; mine: Track[] }) {
+export function WhoLobby({
+  room,
+  playerId,
+  mine,
+  onMine,
+}: {
+  room: RoomView
+  playerId: string
+  mine: Track[]
+  onMine: (tracks: Track[]) => void
+}) {
   const preview = usePreview()
   const perPlayer = room.whois?.perPlayer ?? 2
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<WhoSearchResult[]>([])
-  const [searching, setSearching] = useState(false)
+  /** Recherche dont on attend la réponse (null : aucune). */
+  const [searching, setSearching] = useState<string | null>(null)
+  /** Recherche dont les résultats sont affichés. */
+  const [shown, setShown] = useState('')
   const [adding, setAdding] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [added, setAdded] = useState<string | null>(null)
   const lastQuery = useRef('')
+  const input = useRef<HTMLInputElement>(null)
+  const top = useRef<HTMLElement>(null)
   const done = mine.length >= perPlayer
+
+  const runSearch = (q: string) => {
+    lastQuery.current = q
+    setSearching(q)
+    socket.timeout(SEARCH_TIMEOUT_MS).emit('whois:search', { query: q }, (err, res) => {
+      if (lastQuery.current !== q) return
+      setSearching(null)
+      setShown(q)
+      if (err) {
+        setResults([])
+        setError('La recherche ne répond pas. Vérifie ta connexion et réessaie.')
+        return
+      }
+      setError(res.error ?? null)
+      setResults(res.results)
+    })
+  }
 
   // Recherche pendant la frappe, avec un petit délai.
   useEffect(() => {
     const q = query.trim()
     if (q.length < 2) {
+      lastQuery.current = ''
+      setSearching(null)
       setResults([])
+      setShown('')
       return
     }
-    const timer = setTimeout(() => {
-      lastQuery.current = q
-      setSearching(true)
-      socket.emit('whois:search', { query: q }, (list) => {
-        if (lastQuery.current !== q) return
-        setSearching(false)
-        setResults(list)
-      })
-    }, 450)
+    if (q === lastQuery.current) return
+    const timer = setTimeout(() => runSearch(q), 450)
     return () => clearTimeout(timer)
   }, [query])
 
   const add = (result: WhoSearchResult) => {
+    if (adding !== null || done) return
     setError(null)
+    setAdded(null)
     setAdding(result.deezerId)
-    socket.emit('whois:add', { deezerId: result.deezerId }, (res) => {
+    // On ferme le clavier, pour voir la liste de ses morceaux.
+    input.current?.blur()
+    socket.timeout(ADD_TIMEOUT_MS).emit('whois:add', { deezerId: result.deezerId }, (err, res) => {
       setAdding(null)
+      if (err) return setError("Le serveur n'a pas répondu. Vérifie ta connexion et réessaie.")
       if (!res.ok) return setError(res.error ?? "Impossible d'ajouter ce morceau.")
+      if (res.tracks) onMine(res.tracks)
       preview.stop()
+      setAdded(`« ${result.title} » est dans ta sélection.`)
       setQuery('')
       setResults([])
+      setShown('')
+      lastQuery.current = ''
+      top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }
 
+  const remove = (trackId: string) => {
+    setAdded(null)
+    socket.emit('whois:remove', { trackId })
+  }
+
   const chosen = new Set(mine.map((t) => t.id))
+  const q = query.trim()
 
   return (
-    <section className="who-lobby stack">
+    <section className="who-lobby stack" ref={top}>
       <div>
         <span className="eyebrow">Qui a mis ce son ?</span>
         <h1 className="display">{done ? 'Tes morceaux sont prêts' : 'Choisis tes morceaux'}</h1>
         <p className="muted">
           {done
-            ? "On attend les autres. Garde le secret : personne ne voit ce que tu as mis."
-            : `Ajoute ${perPlayer} morceaux en secret. Les autres devront deviner que c'est toi.`}
+            ? 'On attend les autres. Garde le secret : personne ne voit ce que tu as mis.'
+            : `Ajoute ${perPlayer} morceau${perPlayer > 1 ? 'x' : ''} en secret. Les autres devront deviner que c'est toi.`}
         </p>
       </div>
 
@@ -131,29 +180,48 @@ export function WhoLobby({ room, playerId, mine }: { room: RoomView; playerId: s
         </span>
       </div>
 
+      {added && (
+        <p className="result is-good" role="status">
+          <Icon name="check" size={18} />
+          {added}
+        </p>
+      )}
+
       {mine.length > 0 && (
-        <ul className="who-list">
-          {mine.map((t) => (
-            <li key={t.id}>
-              <span className="who-cover">{t.albumImage && <Cover src={t.albumImage} />}</span>
-              <span className="who-text">
-                <strong>{t.title}</strong>
-                <span className="muted small">{t.artists.join(', ')}</span>
-              </span>
-              <button className="btn btn-ghost" onClick={() => socket.emit('whois:remove', { trackId: t.id })}>
-                Retirer
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="stack-tight">
+          <span className="eyebrow">Ta sélection</span>
+          <ul className="who-list">
+            {mine.map((t) => (
+              <li key={t.id}>
+                <span className="who-cover">{t.albumImage && <Cover src={t.albumImage} />}</span>
+                <span className="who-text">
+                  <strong>{t.title}</strong>
+                  <span className="muted small">{t.artists.join(', ')}</span>
+                </span>
+                <button className="btn btn-ghost" onClick={() => remove(t.id)}>
+                  Retirer
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {!done && (
-        <div className="stack">
+        <form
+          className="stack-tight"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (q.length >= 2) runSearch(q)
+            input.current?.blur()
+          }}
+        >
+          <span className="eyebrow">Ajouter un morceau</span>
           <input
-            className="input"
+            ref={input}
             type="search"
-            placeholder="Titre ou artiste…"
+            enterKeyHint="search"
+            placeholder="Titre et artiste, ex. : get lucky daft punk"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoComplete="off"
@@ -161,47 +229,65 @@ export function WhoLobby({ room, playerId, mine }: { room: RoomView; playerId: s
             spellCheck={false}
           />
           {error && <p className="notice is-bad">{error}</p>}
-          {searching && results.length === 0 && <p className="muted small">Recherche…</p>}
-          {!searching && query.trim().length >= 2 && results.length === 0 && (
-            <p className="muted small">Aucun résultat.</p>
+          {searching !== null && <p className="muted small">Recherche…</p>}
+          {searching === null && shown !== '' && shown === q && results.length === 0 && !error && (
+            <p className="muted small">Aucun résultat. Essaie avec le nom de l'artiste en plus du titre.</p>
           )}
           {results.length > 0 && (
-            <ul className="who-list who-results">
-              {results.map((r) => {
-                const already = chosen.has(`qui:${r.deezerId}`)
-                return (
-                  <li key={r.deezerId}>
-                    <button
-                      className={`who-cover is-button ${preview.playing === r.preview ? 'is-playing' : ''}`}
-                      disabled={!r.preview}
-                      onClick={() => r.preview && preview.toggle(r.preview)}
-                      aria-label={preview.playing === r.preview ? 'Arrêter' : 'Écouter'}
-                    >
-                      {r.cover && <Cover src={r.cover} />}
-                      <span className="who-cover-icon">
-                        <Icon name={preview.playing === r.preview ? 'cross' : 'play'} size={16} />
-                      </span>
-                    </button>
-                    <span className="who-text">
-                      <strong>{r.title}</strong>
-                      <span className="muted small">{r.artist}</span>
-                    </span>
-                    <button
-                      className="btn btn-primary"
-                      disabled={already || adding !== null}
-                      onClick={() => add(r)}
-                    >
-                      {already ? 'Ajouté' : adding === r.deezerId ? '…' : 'Ajouter'}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+            <>
+              <p className="muted small">Touche un morceau pour l'ajouter, ou la pochette pour l'écouter.</p>
+              <ul className="who-list who-results">
+                {results.map((r) => {
+                  const already = chosen.has(`qui:${r.deezerId}`)
+                  const isAdding = adding === r.deezerId
+                  const isPlaying = !!r.preview && preview.playing === r.preview
+                  return (
+                    <li key={r.deezerId} className={`${already ? 'is-chosen' : ''} ${isAdding ? 'is-adding' : ''}`}>
+                      <button
+                        type="button"
+                        className={`who-cover is-button ${isPlaying ? 'is-playing' : ''}`}
+                        disabled={!r.preview}
+                        onClick={() => r.preview && preview.toggle(r.preview)}
+                        aria-label={isPlaying ? `Arrêter ${r.title}` : `Écouter ${r.title}`}
+                      >
+                        {r.cover && <Cover src={r.cover} />}
+                        <span className="who-cover-icon">
+                          <Icon name={isPlaying ? 'cross' : 'play'} size={16} />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="who-pick"
+                        disabled={already || adding !== null}
+                        onClick={() => add(r)}
+                      >
+                        <span className="who-text">
+                          <strong>{r.title}</strong>
+                          <span className="muted small">{r.artist}</span>
+                        </span>
+                        <span className="who-pick-action">
+                          {already ? (
+                            <>
+                              <Icon name="check" size={16} />
+                              Ajouté
+                            </>
+                          ) : isAdding ? (
+                            'Ajout…'
+                          ) : (
+                            'Ajouter'
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
           )}
-        </div>
+        </form>
       )}
 
-      <div>
+      <div className="stack-tight">
         <span className="eyebrow">Joueurs</span>
         <PlayerTiles players={room.players} meId={playerId} counts={room.whois?.counts} perPlayer={perPlayer} />
       </div>

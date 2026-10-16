@@ -59,7 +59,7 @@ export function PlayerApp() {
   const [options, setOptions] = useState<AnswerOption[]>([])
   const [room, setRoom] = useState<RoomView | null>(null)
   // « Qui a mis ce son ? » : mes morceaux, et la manche où c'est le mien.
-  const mine = useMine()
+  const [mine, setMine] = useMine()
   const yours = useYours()
 
   const join = useCallback(
@@ -167,7 +167,7 @@ export function PlayerApp() {
       </header>
 
       <main className="page">
-        {room.kind === 'whois' && room.phase === 'lobby' && <WhoLobby room={room} playerId={id} mine={mine} />}
+        {room.kind === 'whois' && room.phase === 'lobby' && <WhoLobby room={room} playerId={id} mine={mine} onMine={setMine} />}
         {room.kind === 'whois' && room.phase === 'playing' && <WhoVote room={room} playerId={id} yours={yours} />}
         {room.kind === 'whois' && room.phase === 'reveal' && <WhoPhoneReveal room={room} playerId={id} />}
         {room.kind !== 'whois' && room.phase === 'lobby' && (

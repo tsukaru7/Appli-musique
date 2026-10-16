@@ -147,8 +147,14 @@ export interface ClientToServerEvents {
   'player:guess': (payload: { optionId?: string; text?: string }) => void
   'player:pass': () => void
   /** « Qui a mis ce son ? » : chercher, ajouter, retirer un morceau, et voter. */
-  'whois:search': (payload: { query: string }, ack: (results: WhoSearchResult[]) => void) => void
-  'whois:add': (payload: { deezerId: number }, ack: (res: { ok: boolean; error?: string }) => void) => void
+  'whois:search': (
+    payload: { query: string },
+    ack: (res: { results: WhoSearchResult[]; error?: string }) => void,
+  ) => void
+  'whois:add': (
+    payload: { deezerId: number },
+    ack: (res: { ok: boolean; error?: string; tracks?: Track[] }) => void,
+  ) => void
   'whois:remove': (payload: { trackId: string }) => void
   'player:vote': (payload: { targetId: string }) => void
 }

@@ -28,7 +28,8 @@ async function throttle(): Promise<void> {
 
 async function deezerGet<T extends { error?: DeezerTrack['error'] }>(path: string, attempt = 0): Promise<T> {
   await throttle()
-  const res = await fetch(`${DEEZER_API}${path}`)
+  // Deezer qui ne répond pas ne doit jamais bloquer une partie : on abandonne au bout de 8 s.
+  const res = await fetch(`${DEEZER_API}${path}`, { signal: AbortSignal.timeout(8000) })
   const data = (await res.json()) as T
   // Code 4 = trop de requêtes : Deezer accepte environ 50 requêtes toutes les 5 secondes.
   if (data.error?.code === 4 && attempt < 3) {
@@ -163,8 +164,8 @@ export async function getDeezerTrack(id: number): Promise<DeezerMatch | null> {
 }
 
 /** Recherche libre (page de vérification des packs). */
-export async function searchTracks(query: string): Promise<DeezerMatch[]> {
-  return (await search(query, 15)).map((t) => toMatch(t, 'manual'))
+export async function searchTracks(query: string, limit = 15): Promise<DeezerMatch[]> {
+  return (await search(query, limit)).map((t) => toMatch(t, 'manual'))
 }
 
 /**

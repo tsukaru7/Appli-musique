@@ -2620,3 +2620,87 @@ a {
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* L'anneau autour de son propre avatar dépasse : on lui laisse de la place. */
+.player-tiles {
+  padding-top: 6px;
+}
+
+/* Résultat de recherche : toute la ligne ajoute le morceau, la pochette sert à écouter. */
+.who-results li {
+  padding: 6px;
+}
+
+.who-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 4px 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.who-pick-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.who-pick:active .who-pick-action {
+  transform: scale(0.96);
+}
+
+.who-pick:disabled {
+  cursor: default;
+}
+
+.who-results li:has(.who-pick:disabled) .who-pick-action {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+.who-results li.is-chosen .who-pick-action {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.who-results li.is-adding {
+  border-color: var(--accent);
+}
+
+.who-results li.is-adding .who-pick-action {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Un titre très long ne doit jamais élargir la page : il est coupé avec « … ». */
+.who-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.who-list li,
+.who-lobby,
+.who-lobby > * {
+  min-width: 0;
+}
