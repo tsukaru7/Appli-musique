@@ -549,7 +549,7 @@ io.on('connection', (socket: GameSocket) => {
     const room = rooms.get(String(code).toUpperCase().trim())
     if (!room) {
       recordFailure(ip)
-      return ack({ ok: false, error: "Ce code de partie n'existe pas." })
+      return ack({ ok: false, error: "Ce code de partie n'existe pas (ou plus) : demande le code affiché en ce moment sur l'écran de l'hôte." })
     }
     const cleanName = String(name).trim().slice(0, 20)
     if (!cleanName) return ack({ ok: false, error: 'Choisis un pseudo.' })
@@ -690,6 +690,10 @@ setInterval(() => {
     if (now - room.lastActivity > ROOM_TTL_MS) rooms.delete(code)
   }
 }, 10 * 60 * 1000).unref()
+
+// Une erreur inattendue ne doit pas arrêter le serveur : toutes les parties en cours seraient perdues.
+process.on('uncaughtException', (err) => console.error('Erreur inattendue :', err))
+process.on('unhandledRejection', (err) => console.error('Promesse rejetée :', err))
 
 httpServer.listen(PORT, () => {
   console.log(`Serveur de jeu prêt sur le port ${PORT}`)

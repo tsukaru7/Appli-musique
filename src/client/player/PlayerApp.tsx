@@ -18,6 +18,27 @@ import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
 import { useMine, useYours, WhoLobby, WhoPhoneReveal, WhoVote } from './WhoPlayer.tsx'
 
+/** La page est-elle connectée au serveur de jeu ? */
+function useOnline(): boolean {
+  // Au chargement, la connexion prend un instant : on ne l'affiche que si elle tarde.
+  const [online, setOnline] = useState(true)
+  useEffect(() => {
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    const slow = setTimeout(() => !socket.connected && setOnline(false), 2000)
+    socket.on('connect', on)
+    socket.on('disconnect', off)
+    socket.io.on('reconnect_attempt', off)
+    return () => {
+      clearTimeout(slow)
+      socket.off('connect', on)
+      socket.off('disconnect', off)
+      socket.io.off('reconnect_attempt', off)
+    }
+  }, [])
+  return online
+}
+
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
 function playerId(): string {
   let id = localStorage.getItem('playerId')
@@ -54,6 +75,9 @@ export function PlayerApp() {
     return isAvatar(stored) ? stored : defaultAvatar(id)
   })
   const [joined, setJoined] = useState(false)
+  /** « C'est parti » touché : on attend la réponse du serveur. */
+  const [joining, setJoining] = useState(false)
+  const online = useOnline()
   const [reconnecting, setReconnecting] = useState(saved !== null)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<AnswerOption[]>([])
@@ -65,9 +89,17 @@ export function PlayerApp() {
   const join = useCallback(
     (joinCode: string, joinName: string, joinAvatar: string) => {
       setError(null)
+      setJoining(true)
       const payload = { code: joinCode.toUpperCase().trim(), name: joinName, playerId: id, avatar: joinAvatar }
-      socket.emit('player:join', payload, (res) => {
+      // Sans réponse au bout de 15 s (serveur qui redémarre ou se réveille), on le dit au lieu de ne rien faire.
+      socket.timeout(15000).emit('player:join', payload, (err, res) => {
         setReconnecting(false)
+        setJoining(false)
+        if (err) {
+          return setError(
+            "Le serveur ne répond pas. Il est peut-être en train de démarrer : réessaie dans 30 secondes.",
+          )
+        }
         if (!res.ok) {
           localStorage.removeItem(SESSION_KEY)
           return setError(res.error)
@@ -144,6 +176,8 @@ export function PlayerApp() {
         avatar={avatar}
         onAvatarChange={setAvatar}
         error={error}
+        joining={joining}
+        online={online}
         onJoin={() => join(code, name, avatar)}
       />
     )
@@ -512,6 +546,8 @@ function JoinScreen({
   avatar,
   onAvatarChange,
   error,
+  joining,
+  online,
   onJoin,
 }: {
   code: string
@@ -522,9 +558,12 @@ function JoinScreen({
   avatar: string
   onAvatarChange: (avatar: string) => void
   error: string | null
+  joining: boolean
+  online: boolean
   onJoin: () => void
 }) {
   const [editCode, setEditCode] = useState(!codeFromLink)
+  const [hint, setHint] = useState<string | null>(null)
   const random = () => {
     const others = AVATAR_IDS.filter((a) => a !== avatar)
     onAvatarChange(others[Math.floor(Math.random() * others.length)])
@@ -537,6 +576,13 @@ function JoinScreen({
         className="join-card"
         onSubmit={(e) => {
           e.preventDefault()
+          // Il manque quelque chose : on le dit (au lieu d'un bouton grisé qu'on ne comprend pas).
+          if (!name.trim()) return setHint('Écris ton pseudo.')
+          if (code.trim().length !== 4) {
+            setEditCode(true)
+            return setHint('Entre le code de la partie : les 4 lettres affichées sur l’écran de l’hôte.')
+          }
+          setHint(null)
           onJoin()
         }}
       >
@@ -609,10 +655,12 @@ function JoinScreen({
           </p>
         )}
 
+        {hint && <p className="notice is-bad">{hint}</p>}
         {error && <p className="notice is-bad">{error}</p>}
-        <button className="btn btn-primary btn-lg" type="submit" disabled={code.length !== 4 || !name.trim()}>
-          C'est parti
-          <Icon name="arrow" size={18} />
+        {!online && <p className="notice">Connexion au serveur…</p>}
+        <button className="btn btn-primary btn-lg" type="submit" disabled={joining}>
+          {joining ? 'Connexion à la partie…' : "C'est parti"}
+          {!joining && <Icon name="arrow" size={18} />}
         </button>
       </form>
     </main>
