@@ -1,5 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { SNIPPET_DURATIONS_MS, type PlayerRoundView, type RoomView, type Track } from '../shared/protocol.ts'
+import {
+  SNIPPET_DURATIONS_MS,
+  type PlayerRoundView,
+  type PlayerView,
+  type RoomView,
+  type Track,
+} from '../shared/protocol.ts'
+import { Avatar } from './avatar.tsx'
 
 const LAST_STAGE = SNIPPET_DURATIONS_MS.length - 1
 const TOTAL_MS = SNIPPET_DURATIONS_MS[LAST_STAGE]
@@ -307,6 +314,20 @@ export function ArtMosaic({ images, icon }: { images: string[]; icon: IconName }
 
 /* ---------- Joueurs et scores ---------- */
 
+/** Les joueurs de la salle d'attente : avatar et pseudo. */
+export function PlayerTiles({ players, meId }: { players: PlayerView[]; meId?: string }) {
+  return (
+    <ul className="player-tiles">
+      {players.map((p) => (
+        <li key={p.id} className={`${p.id === meId ? 'is-me' : ''} ${p.connected ? '' : 'is-offline'}`}>
+          <Avatar id={p.avatar} size={64} />
+          <span>{p.name}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function statusOf(r: PlayerRoundView | undefined, mode: RoomView['mode']): { icon: IconName; text: string; tone: string } {
   switch (r?.status) {
     case 'correct':
@@ -331,8 +352,11 @@ export function RoundStatusList({ room }: { room: RoomView }) {
         const status = statusOf(r, room.mode)
         return (
           <li key={p.id} className={`status-card tone-${status.tone} ${p.connected ? '' : 'is-offline'}`}>
-            <span className="status-icon">
-              <Icon name={status.icon} size={16} />
+            <span className="status-avatar">
+              <Avatar id={p.avatar} size={40} />
+              <span className="status-icon">
+                <Icon name={status.icon} size={12} />
+              </span>
             </span>
             <span className="status-name">{p.name}</span>
             <span className="status-text">{p.connected ? status.text : 'Déconnecté'}</span>
@@ -359,6 +383,7 @@ export function Scoreboard({ room, highlightId }: { room: RoomView; highlightId?
         return (
           <li key={p.id} className={p.id === highlightId ? 'is-me' : ''}>
             <span className="score-rank">{i + 1}</span>
+            <Avatar id={p.avatar} size={34} />
             <span className="score-name">{p.name}</span>
             {room.phase === 'reveal' && r?.foundAtStage !== undefined && (
               <span className="score-gain">

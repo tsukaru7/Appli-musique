@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
-import { CategoryBadge, Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
+import {
+  CategoryBadge,
+  Icon,
+  PlayerTiles,
+  PlayRing,
+  Scoreboard,
+  StageBar,
+  TrackReveal,
+  Wordmark,
+  seconds,
+} from '../components.tsx'
+import { Avatar } from '../avatar.tsx'
+import { AVATAR_IDS, defaultAvatar, isAvatar } from '../../shared/avatars.ts'
 import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
 
@@ -18,7 +30,7 @@ function playerId(): string {
 const SESSION_KEY = 'playerSession'
 
 /** Dernière partie rejointe sur ce téléphone, pour y revenir tout seul après un rechargement. */
-function readSession(): { code: string; name: string } | null {
+function readSession(): { code: string; name: string; avatar?: string } | null {
   try {
     return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null')
   } catch {
@@ -35,24 +47,33 @@ export function PlayerApp() {
   })
   const [code, setCode] = useState(saved?.code ?? urlCode)
   const [name, setName] = useState(() => saved?.name ?? localStorage.getItem('playerName') ?? '')
+  const id = useMemo(playerId, [])
+  const [avatar, setAvatar] = useState(() => {
+    const stored = saved?.avatar ?? localStorage.getItem('playerAvatar')
+    return isAvatar(stored) ? stored : defaultAvatar(id)
+  })
   const [joined, setJoined] = useState(false)
   const [reconnecting, setReconnecting] = useState(saved !== null)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<AnswerOption[]>([])
   const [room, setRoom] = useState<RoomView | null>(null)
-  const id = useMemo(playerId, [])
 
   const join = useCallback(
-    (joinCode: string, joinName: string) => {
+    (joinCode: string, joinName: string, joinAvatar: string) => {
       setError(null)
-      socket.emit('player:join', { code: joinCode.toUpperCase().trim(), name: joinName, playerId: id }, (res) => {
+      const payload = { code: joinCode.toUpperCase().trim(), name: joinName, playerId: id, avatar: joinAvatar }
+      socket.emit('player:join', payload, (res) => {
         setReconnecting(false)
         if (!res.ok) {
           localStorage.removeItem(SESSION_KEY)
           return setError(res.error)
         }
         localStorage.setItem('playerName', joinName)
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ code: joinCode.toUpperCase().trim(), name: joinName }))
+        localStorage.setItem('playerAvatar', joinAvatar)
+        localStorage.setItem(
+          SESSION_KEY,
+          JSON.stringify({ code: joinCode.toUpperCase().trim(), name: joinName, avatar: joinAvatar }),
+        )
         setOptions(res.options)
         setJoined(true)
       })
@@ -62,7 +83,8 @@ export function PlayerApp() {
 
   // Page rechargée : on revient directement dans la partie, avec le même score.
   useEffect(() => {
-    if (saved) join(saved.code, saved.name)
+    if (saved) join(saved.code, saved.name, avatar)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved, join])
 
   const leave = () => {
@@ -90,12 +112,13 @@ export function PlayerApp() {
   // Après une coupure réseau, on se reconnecte automatiquement à la partie.
   useEffect(() => {
     if (!joined) return
-    const rejoin = () => socket.emit('player:join', { code: code.toUpperCase().trim(), name, playerId: id }, () => {})
+    const rejoin = () =>
+      socket.emit('player:join', { code: code.toUpperCase().trim(), name, playerId: id, avatar }, () => {})
     socket.on('connect', rejoin)
     return () => {
       socket.off('connect', rejoin)
     }
-  }, [joined, code, name, id])
+  }, [joined, code, name, id, avatar])
 
   if (reconnecting || (joined && !room)) {
     return (
@@ -108,39 +131,17 @@ export function PlayerApp() {
 
   if (!joined || !room) {
     return (
-      <main className="splash">
-        <Wordmark large />
-        <form
-          className="stack narrow"
-          onSubmit={(e) => {
-            e.preventDefault()
-            join(code, name)
-          }}
-        >
-          <label className="field">
-            <span className="field-label">Code de la partie</span>
-            <input
-              className="code-input"
-              value={code}
-              maxLength={4}
-              autoCapitalize="characters"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="ABCD"
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Ton pseudo</span>
-            <input value={name} maxLength={20} autoComplete="nickname" onChange={(e) => setName(e.target.value)} />
-          </label>
-          {error && <p className="notice is-bad">{error}</p>}
-          <button className="btn btn-primary btn-lg" type="submit" disabled={code.length !== 4 || !name.trim()}>
-            Rejoindre
-            <Icon name="arrow" size={18} />
-          </button>
-        </form>
-      </main>
+      <JoinScreen
+        code={code}
+        onCodeChange={setCode}
+        codeFromLink={urlCode !== '' && code === urlCode}
+        name={name}
+        onNameChange={setName}
+        avatar={avatar}
+        onAvatarChange={setAvatar}
+        error={error}
+        onJoin={() => join(code, name, avatar)}
+      />
     )
   }
 
@@ -150,6 +151,7 @@ export function PlayerApp() {
     <div className="app phone">
       <header className="appbar">
         <span className="appbar-player">
+          <Avatar id={me?.avatar ?? avatar} size={32} />
           <strong>{name}</strong>
           <span className="muted">{me?.score ?? 0} pts</span>
         </span>
@@ -166,13 +168,7 @@ export function PlayerApp() {
             <span className="eyebrow">Tu es dans la partie</span>
             <h1 className="display">Ça commence bientôt</h1>
             <p className="muted">L'hôte lance la partie dès que tout le monde est là.</p>
-            <ul className="chips">
-              {room.players.map((p) => (
-                <li key={p.id} className={p.id === id ? 'is-me' : ''}>
-                  {p.name}
-                </li>
-              ))}
-            </ul>
+            <PlayerTiles players={room.players} meId={id} />
           </section>
         )}
         {room.phase === 'playing' &&
@@ -495,5 +491,113 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
       )}
       <WrongGuesses guesses={wrongGuesses} />
     </section>
+  )
+}
+
+/** Écran pour rejoindre : choisir son avatar, son pseudo (et le code si on n'est pas venu par le QR code). */
+function JoinScreen({
+  code,
+  onCodeChange,
+  codeFromLink,
+  name,
+  onNameChange,
+  avatar,
+  onAvatarChange,
+  error,
+  onJoin,
+}: {
+  code: string
+  onCodeChange: (code: string) => void
+  codeFromLink: boolean
+  name: string
+  onNameChange: (name: string) => void
+  avatar: string
+  onAvatarChange: (avatar: string) => void
+  error: string | null
+  onJoin: () => void
+}) {
+  const [editCode, setEditCode] = useState(!codeFromLink)
+  const random = () => {
+    const others = AVATAR_IDS.filter((a) => a !== avatar)
+    onAvatarChange(others[Math.floor(Math.random() * others.length)])
+  }
+
+  return (
+    <main className="join">
+      <Wordmark />
+      <form
+        className="join-card"
+        onSubmit={(e) => {
+          e.preventDefault()
+          onJoin()
+        }}
+      >
+        <div className="join-hero">
+          <Avatar id={avatar} size={128} className="avatar-hero" />
+          <button type="button" className="btn btn-ghost" onClick={random}>
+            <Icon name="replay" size={16} />
+            Au hasard
+          </button>
+        </div>
+
+        <div className="field">
+          <span className="field-label">Choisis ton avatar</span>
+          <div className="avatar-grid" role="radiogroup" aria-label="Avatar">
+            {AVATAR_IDS.map((a) => (
+              <button
+                key={a}
+                type="button"
+                role="radio"
+                aria-checked={a === avatar}
+                className={`avatar-choice ${a === avatar ? 'is-on' : ''}`}
+                onClick={() => onAvatarChange(a)}
+              >
+                <Avatar id={a} size={48} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="field">
+          <span className="field-label">Ton pseudo</span>
+          <input
+            value={name}
+            maxLength={20}
+            autoComplete="nickname"
+            placeholder="Ex. : Paulo"
+            onChange={(e) => onNameChange(e.target.value)}
+          />
+        </label>
+
+        {editCode ? (
+          <label className="field">
+            <span className="field-label">Code de la partie</span>
+            <input
+              className="code-input"
+              value={code}
+              maxLength={4}
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="ABCD"
+              onChange={(e) => onCodeChange(e.target.value.toUpperCase())}
+            />
+          </label>
+        ) : (
+          <p className="join-code muted">
+            Partie <span className="mono">{code}</span>
+            <button type="button" className="btn btn-ghost small" onClick={() => setEditCode(true)}>
+              Changer
+            </button>
+          </p>
+        )}
+
+        {error && <p className="notice is-bad">{error}</p>}
+        <button className="btn btn-primary btn-lg" type="submit" disabled={code.length !== 4 || !name.trim()}>
+          C'est parti
+          <Icon name="arrow" size={18} />
+        </button>
+      </form>
+    </main>
   )
 }

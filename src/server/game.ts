@@ -1,5 +1,6 @@
 import { isCorrectAnswer, trackKey, trackLabel } from '../shared/answers.ts'
 import { packOfTrack } from '../shared/packs/index.ts'
+import { defaultAvatar } from '../shared/avatars.ts'
 import {
   POINTS_BY_STAGE,
   SNIPPET_DURATIONS_MS,
@@ -17,6 +18,7 @@ const LAST_STAGE = SNIPPET_DURATIONS_MS.length - 1
 interface Player {
   id: string
   name: string
+  avatar: string
   score: number
   connected: boolean
 }
@@ -93,14 +95,15 @@ export class Game {
     this.random = options.random ?? Math.random
   }
 
-  join(id: string, name: string): void {
+  join(id: string, name: string, avatar: string = defaultAvatar(id)): void {
     const existing = this.players.get(id)
     if (existing) {
       existing.connected = true
       existing.name = name
+      existing.avatar = avatar
       return
     }
-    this.players.set(id, { id, name, score: 0, connected: true })
+    this.players.set(id, { id, name, avatar, score: 0, connected: true })
   }
 
   /** Un joueur se déconnecte : on ne l'attend plus pour passer au palier suivant. */

@@ -48,6 +48,8 @@ export type GuessStatus = 'pending' | 'correct' | 'wrong' | 'passed' | 'out'
 export interface PlayerView {
   id: string
   name: string
+  /** Avatar choisi (identifiant de src/shared/avatars.ts). */
+  avatar: string
   score: number
   connected: boolean
 }
@@ -106,7 +108,7 @@ export interface ClientToServerEvents {
   /** L'hôte quitte la partie : elle est fermée pour tout le monde. */
   'host:end': () => void
   'player:join': (
-    payload: { code: string; name: string; playerId: string },
+    payload: { code: string; name: string; playerId: string; avatar?: string },
     ack: (res: { ok: true; options: AnswerOption[] } | { ok: false; error: string }) => void,
   ) => void
   'player:guess': (payload: { optionId?: string; text?: string }) => void

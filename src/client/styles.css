@@ -1117,12 +1117,21 @@ input:focus {
     background 0.2s var(--ease);
 }
 
-.status-icon {
+.status-avatar {
+  position: relative;
   grid-row: span 2;
+  line-height: 0;
+}
+
+.status-icon {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--surface);
   border-radius: 50%;
   background: var(--surface-3);
   color: var(--muted);
@@ -2071,4 +2080,122 @@ a {
   from {
     opacity: 0;
   }
+}
+
+/* ---------- Avatars ---------- */
+
+.avatar {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.join {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 16px 40px;
+}
+
+.join-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 440px;
+}
+
+.join-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-hero {
+  box-shadow: 0 0 0 4px var(--bg), 0 0 0 6px var(--accent);
+  animation: pop 0.25s var(--ease);
+}
+
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
+.avatar-choice {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), border-color 0.12s var(--ease);
+}
+
+.avatar-choice .avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.avatar-choice:hover {
+  transform: scale(1.06);
+}
+
+.avatar-choice.is-on {
+  border-color: var(--accent);
+}
+
+.join-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.join-code .mono {
+  color: var(--accent);
+  font-size: 1.1rem;
+}
+
+.player-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 14px;
+}
+
+.player-tiles li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  text-align: center;
+  animation: pop 0.3s var(--ease);
+}
+
+.player-tiles li span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-tiles li.is-me .avatar {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
+}
+
+.player-tiles li.is-offline {
+  opacity: 0.4;
+}
+
+.scoreboard li {
+  align-items: center;
 }

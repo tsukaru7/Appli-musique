@@ -17,6 +17,7 @@ import { fetchPreview, findDeezerTrack, findPlayableTracks, searchTracks, type D
 import { Game, type Change } from './game.ts'
 import { findPack, packOfTrack } from '../shared/packs/index.ts'
 import { findWorkImage, getPackArt } from './images.ts'
+import { defaultAvatar, isAvatar } from '../shared/avatars.ts'
 import { DEEZER_OVERRIDES, overrideKey } from '../shared/packs/overrides.ts'
 
 const PORT = Number(process.env.PORT ?? 3001)
@@ -500,7 +501,7 @@ io.on('connection', (socket: GameSocket) => {
     if (room) socket.to(room.game.code).emit('snippet:start', { stage, durationMs })
   })
 
-  socket.on('player:join', ({ code, name, playerId }, ack) => {
+  socket.on('player:join', ({ code, name, playerId, avatar }, ack) => {
     if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     const room = rooms.get(String(code).toUpperCase().trim())
     if (!room) {
@@ -512,7 +513,7 @@ io.on('connection', (socket: GameSocket) => {
     const id = String(playerId).slice(0, 64)
     socket.data = { code: room.game.code, role: 'player', playerId: id }
     socket.join(room.game.code)
-    room.game.join(id, cleanName)
+    room.game.join(id, cleanName, isAvatar(avatar) ? avatar : defaultAvatar(id))
     ack({ ok: true, options: room.options })
     broadcast(room)
   })

@@ -22,6 +22,7 @@ import {
   ArtMosaic,
   CategoryBadge,
   PACK_ICONS,
+  PlayerTiles,
   usePackArt,
   type IconName,
 } from '../components.tsx'
@@ -1132,15 +1133,7 @@ function Lobby({
             {room.players.length === 0 ? 'On attend du monde' : `${room.players.length} prêt${room.players.length > 1 ? 's' : ''}`}
           </h2>
         </div>
-        {room.players.length > 0 && (
-          <ul className="chips">
-            {room.players.map((p) => (
-              <li key={p.id} className={p.connected ? '' : 'is-offline'}>
-                {p.name}
-              </li>
-            ))}
-          </ul>
-        )}
+        {room.players.length > 0 && <PlayerTiles players={room.players} />}
         <dl className="facts">
           <div>
             <dt>Mode</dt>
