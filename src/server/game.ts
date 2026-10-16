@@ -2,6 +2,7 @@ import { isCorrectAnswer, trackKey, trackLabel } from '../shared/answers.ts'
 import {
   POINTS_BY_STAGE,
   SNIPPET_DURATIONS_MS,
+  type AnswerBy,
   type GameMode,
   type GuessStatus,
   type Phase,
@@ -33,6 +34,7 @@ interface PlayerRound {
 export interface GameOptions {
   mode?: GameMode
   solo?: boolean
+  answerBy?: AnswerBy
   /** Tous les morceaux de la playlist, pour vérifier les réponses (par défaut : ceux de la partie). */
   answerTracks?: Track[]
   random?: () => number
@@ -61,6 +63,7 @@ export class Game {
   readonly code: string
   readonly mode: GameMode
   readonly solo: boolean
+  readonly answerBy: AnswerBy
   phase: Phase = 'lobby'
   readonly players = new Map<string, Player>()
   readonly totalRounds: number
@@ -78,6 +81,7 @@ export class Game {
     this.code = code
     this.mode = options.mode ?? 'spotify'
     this.solo = options.solo ?? false
+    this.answerBy = options.answerBy ?? 'title'
     this.tracks = tracks
     this.tracksById = new Map([...(options.answerTracks ?? []), ...tracks].map((t) => [t.id, t]))
     const uniqueCount = new Set(tracks.map(trackKey)).size
@@ -191,6 +195,7 @@ export class Game {
       code: this.code,
       mode: this.mode,
       solo: this.solo,
+      answerBy: this.answerBy,
       phase: this.phase,
       players: [...this.players.values()].map((p) => ({ ...p })),
       totalRounds: this.totalRounds,

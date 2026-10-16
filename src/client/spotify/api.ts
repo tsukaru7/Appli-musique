@@ -111,7 +111,7 @@ interface ApiTrack {
   name: string
   is_local?: boolean
   artists: { name: string }[]
-  album?: { images?: { url: string; width?: number }[] }
+  album?: { name?: string; images?: { url: string; width?: number }[] }
   external_ids?: { isrc?: string }
 }
 
@@ -141,6 +141,7 @@ export async function getPlaylistTracks(id: string): Promise<Track[]> {
       artists: t.artists.map((a) => a.name),
       albumImage: (images[1] ?? images[0])?.url,
       isrc: t.external_ids?.isrc,
+      album: t.album?.name,
     })
   }
   return tracks

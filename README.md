@@ -55,6 +55,14 @@ Projet **privé entre amis**, pas destiné à être publié.
   en secours (extraits de 30 s, silence du début sauté automatiquement).
 - À la fin : le score sur le total possible.
 
+### Ce qu'on devine : le morceau ou l'œuvre
+
+- **Le morceau** : trouver le titre de la chanson.
+- **L'œuvre** : trouver le film, le jeu vidéo, la série ou le dessin animé. Pensé pour les
+  playlists de bandes originales : la réponse est le nom de l'album, nettoyé automatiquement
+  (« Interstellar (Original Motion Picture Soundtrack) » → « Interstellar »). Une manche par œuvre.
+  Limite : avec une compilation (« 100 génériques TV »), le nom d'album n'est pas l'œuvre.
+
 Dans les modes à plusieurs, les joueurs rejoignent la partie via un code ou un QR code, dans le
 navigateur, sans rien installer et sans compte. Ils répondent avec une **autocomplétion** sur
 les titres de la playlist.
@@ -89,7 +97,12 @@ les titres de la playlist.
 - [ ] Mode solo
 - [ ] Options de partie : nombre de manches, paliers de durée, deviner le titre et/ou l'artiste
 
-### Version 3 — Bonus
+### Version 3 — Thèmes
+- [x] Deviner l'œuvre (film, jeu, série…) à partir du nom d'album
+- [ ] Packs intégrés (génériques de dessins animés, musiques de jeux vidéo, de films, de séries),
+      avec la réponse écrite à la main et les extraits Deezer
+
+### Version 4 — Bonus
 - [ ] Défi du jour (même morceau pour tout le monde)
 - [ ] Historique des parties et statistiques par joueur
 

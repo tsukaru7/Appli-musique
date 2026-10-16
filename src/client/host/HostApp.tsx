@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import {
   POINTS_BY_STAGE,
   SNIPPET_DURATIONS_MS,
+  type AnswerBy,
   type AnswerOption,
   type GameMode,
   type RoomView,
@@ -215,6 +216,14 @@ function Host({
   const revealAudio = useRef<HTMLAudioElement | null>(null)
   const solo = useSoloPlayer(room, userName)
 
+  const [answerBy, setAnswerBy] = useState<AnswerBy>(() =>
+    localStorage.getItem('answerBy') === 'work' ? 'work' : 'title',
+  )
+  const chooseAnswerBy = (value: AnswerBy) => {
+    localStorage.setItem('answerBy', value)
+    setAnswerBy(value)
+  }
+
   const chooseSetup = (value: Setup) => {
     localStorage.setItem('setup', value)
     setSetup(value)
@@ -361,7 +370,7 @@ function Host({
 
   const createRoom = (tracks: Track[], totalRounds: number) =>
     new Promise<void>((resolve, reject) => {
-      socket.emit('host:create', { tracks, totalRounds, mode: chosenMode, solo: setup === 'solo', password }, (res) => {
+      socket.emit('host:create', { tracks, totalRounds, mode: chosenMode, solo: setup === 'solo', answerBy, password }, (res) => {
         if (!res.ok) {
           if (res.error.includes('Mot de passe')) onBadPassword()
           return reject(new Error(res.error))
@@ -405,6 +414,8 @@ function Host({
             onSetupChange={chooseSetup}
             soloSource={soloSource}
             onSoloSourceChange={chooseSoloSource}
+            answerBy={answerBy}
+            onAnswerByChange={chooseAnswerBy}
             onCreate={createRoom}
           />
         ) : room.phase === 'lobby' && room.solo ? (
@@ -604,17 +615,31 @@ const SOURCES: { id: GameMode; title: string; text: string }[] = [
 
 const ROUND_CHOICES = [5, 10, 15, 20, 30]
 
+const ANSWER_CHOICES: { id: AnswerBy; icon: IconName; title: string; text: string }[] = [
+  { id: 'title', icon: 'play', title: 'Le morceau', text: 'Trouver le titre de la chanson.' },
+  {
+    id: 'work',
+    icon: 'eye',
+    title: "L'œuvre",
+    text: "Trouver le film, le jeu, la série ou le dessin animé. Pour une playlist de bandes originales : la réponse vient du nom de l'album.",
+  },
+]
+
 function PlaylistPicker({
   setup,
   onSetupChange,
   soloSource,
   onSoloSourceChange,
+  answerBy,
+  onAnswerByChange,
   onCreate,
 }: {
   setup: Setup
   onSetupChange: (setup: Setup) => void
   soloSource: GameMode
   onSoloSourceChange: (source: GameMode) => void
+  answerBy: AnswerBy
+  onAnswerByChange: (answerBy: AnswerBy) => void
   onCreate: (tracks: Track[], totalRounds: number) => Promise<void>
 }) {
   const mode: GameMode = setup === 'solo' ? soloSource : setup
@@ -702,7 +727,29 @@ function PlaylistPicker({
 
       <section className="setup-step">
         <h2 className="step-title">
-          <span className="step-num">2</span>
+          <span className="step-num">2</span>Qu'est-ce qu'on devine ?
+        </h2>
+        <div className="choice-grid">
+          {ANSWER_CHOICES.map((c) => (
+            <button
+              key={c.id}
+              className={`choice ${answerBy === c.id ? 'is-selected' : ''}`}
+              onClick={() => onAnswerByChange(c.id)}
+              aria-pressed={answerBy === c.id}
+            >
+              <span className="choice-icon">
+                <Icon name={c.icon} size={22} />
+              </span>
+              <span className="choice-title">{c.title}</span>
+              <span className="choice-text">{c.text}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="setup-step">
+        <h2 className="step-title">
+          <span className="step-num">3</span>
           {setup === 'solo' ? 'Combien de morceaux ?' : 'Combien de manches ?'}
         </h2>
         <div className="segmented" role="radiogroup">
@@ -716,7 +763,7 @@ function PlaylistPicker({
 
       <section className="setup-step">
         <h2 className="step-title">
-          <span className="step-num">3</span>Quelle playlist ?
+          <span className="step-num">4</span>Quelle playlist ?
         </h2>
         <form
           className="inline-form"
@@ -836,6 +883,10 @@ function Lobby({
             <dt>Manches</dt>
             <dd>{room.totalRounds}</dd>
           </div>
+          <div>
+            <dt>À deviner</dt>
+            <dd>{room.answerBy === 'work' ? "L'œuvre" : 'Le morceau'}</dd>
+          </div>
         </dl>
         {room.mode === 'deezer' && (
           <p className="tip">
@@ -934,7 +985,7 @@ function SoloSpotifyRound({
       <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
       {mine?.status !== 'correct' && (
         <>
-          <GuessInput options={options} roundNumber={room.roundNumber} />
+          <GuessInput options={options} roundNumber={room.roundNumber} answerBy={room.answerBy} />
           <button className="btn btn-ghost btn-block" onClick={() => playerSocket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             {room.stage < LAST_STAGE ? `Passer · écouter ${seconds(room.stage + 1)}` : 'Abandonner le morceau'}
