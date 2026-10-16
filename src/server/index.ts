@@ -15,7 +15,8 @@ import type {
 } from '../shared/protocol.ts'
 import { fetchPreview, findPlayableTracks } from './deezer.ts'
 import { Game, type Change } from './game.ts'
-import { findPack } from '../shared/packs/index.ts'
+import { findPack, packOfTrack } from '../shared/packs/index.ts'
+import { findWorkImage, getPackArt } from './images.ts'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const PRODUCTION = process.argv.includes('--production') || process.env.NODE_ENV === 'production'
@@ -64,6 +65,8 @@ interface Room {
   lastActivity: number
   /** Mode Deezer : id Deezer de chaque morceau jouable, et extraits déjà téléchargés. */
   deezerIds: Map<string, number>
+  /** Pochettes Deezer des morceaux trouvés (image de secours pour la révélation). */
+  covers: Map<string, string>
   previews: Map<number, Promise<Buffer>>
 }
 
@@ -94,6 +97,11 @@ app.get('/api/info', (_req, res) => {
         .filter((i) => i && i.family === 'IPv4' && !i.internal)
         .map((i) => i!.address)
   res.json({ lanAddresses, hostPasswordRequired: HOST_PASSWORD !== '' })
+})
+
+/** Images qui illustrent les cartes des packs. */
+app.get('/api/pack-art', async (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600').json(await getPackArt())
 })
 
 app.post('/api/host-check', (req, res) => {
@@ -180,6 +188,7 @@ function afterChange(room: Room, change: Change): void {
   broadcast(room)
   const { game } = room
   if (!change.playNext || !game.current) return
+  if (game.current.work && !game.current.albumImage) loadWorkImage(room, game.current)
   // Un seul écran : c'est l'hôte qui joue l'extrait, il doit savoir lequel.
   if (game.mode === 'spotify' && room.hostSocketId) {
     io.to(room.hostSocketId).emit('host:track', { track: game.current, stage: game.stage })
@@ -197,6 +206,19 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<stri
 function hostRoom(socket: GameSocket): Room | undefined {
   if (socket.data.role !== 'host' || !socket.data.code) return undefined
   return rooms.get(socket.data.code)
+}
+
+/**
+ * Packs : cherche l'image de l'œuvre pendant la manche, pour l'afficher à la révélation
+ * (si elle arrive après, on renvoie l'état de la partie pour la montrer).
+ */
+function loadWorkImage(room: Room, track: Track): void {
+  findWorkImage(track.work!, track.aliases, packOfTrack(track.id))
+    .catch(() => null)
+    .then((url) => {
+      track.albumImage = url ?? room.covers.get(track.id)
+      if (track.albumImage && room.game.current === track && room.game.phase !== 'playing') broadcast(room)
+    })
 }
 
 /** Morceaux des packs choisis : la réponse attendue est l'œuvre (jeu, animé, film…). */
@@ -249,9 +271,14 @@ io.on('connection', (socket: GameSocket) => {
 
     let playable = clean
     let deezerIds = new Map<string, number>()
+    const covers = new Map<string, string>()
     if (audio === 'deezer') {
       // On cherche quelques morceaux de plus que nécessaire, au cas où un extrait serait indisponible.
-      deezerIds = await findPlayableTracks(clean, rounds + 5)
+      const matches = await findPlayableTracks(clean, rounds + 5)
+      for (const [trackId, match] of matches) {
+        deezerIds.set(trackId, match.id)
+        if (match.cover) covers.set(trackId, match.cover)
+      }
       playable = clean.filter((t) => deezerIds.has(t.id))
       if (playable.length === 0) {
         return ack({ ok: false, error: "Aucun morceau n'a été trouvé sur Deezer. Réessaie dans un instant." })
@@ -272,6 +299,7 @@ io.on('connection', (socket: GameSocket) => {
       options: buildAnswerOptions(clean),
       lastActivity: Date.now(),
       deezerIds,
+      covers,
       previews: new Map(),
     }
     rooms.set(code, room)

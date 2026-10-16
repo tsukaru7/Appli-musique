@@ -1,4 +1,5 @@
 import { isCorrectAnswer, trackKey, trackLabel } from '../shared/answers.ts'
+import { packOfTrack } from '../shared/packs/index.ts'
 import {
   POINTS_BY_STAGE,
   SNIPPET_DURATIONS_MS,
@@ -207,7 +208,14 @@ export class Game {
       stage: this.stage,
       roundResults,
       revealed: this.phase === 'reveal' || this.phase === 'finished' ? this.current : undefined,
+      category: this.category(),
     }
+  }
+
+  private category(): RoomView['category'] {
+    if (!this.current || this.phase === 'lobby' || this.packs.length === 0) return undefined
+    const pack = packOfTrack(this.current.id)
+    return pack && { id: pack.id, label: pack.label }
   }
 
   private startRound(): Change {

@@ -40,6 +40,8 @@ async function sha256Base64Url(text: string): Promise<string> {
 }
 
 export async function login(): Promise<void> {
+  // Au retour de Spotify, on reprend directement les réglages au lieu de l'accueil.
+  sessionStorage.setItem('afterLogin', '1')
   const verifier = randomString(64)
   localStorage.setItem(VERIFIER_KEY, verifier)
   const params = new URLSearchParams({

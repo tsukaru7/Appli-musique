@@ -19,6 +19,10 @@ import {
   TrackReveal,
   Wordmark,
   seconds,
+  ArtMosaic,
+  CategoryBadge,
+  PACK_ICONS,
+  usePackArt,
   type IconName,
 } from '../components.tsx'
 import { DeezerRound, GuessInput, RoundHeader, WrongGuesses, useWrongGuesses } from '../player/PlayerApp.tsx'
@@ -202,6 +206,8 @@ function Host({
   // Réglages de la partie (gardés d'une fois sur l'autre)
   const [setup, setSetup] = useState<Setup>(() => readChoice('setup', ['deezer', 'spotify', 'solo'], 'deezer'))
   const [content, setContent] = useState<Content>(() => readChoice('content', ['packs', 'playlist'], 'packs'))
+  // On revient sur l'accueil à chaque nouvelle partie, sauf au retour de la connexion Spotify.
+  const [showHome, setShowHome] = useState(() => !sessionStorage.getItem('afterLogin'))
   const [selectedPacks, setSelectedPacks] = useState<string[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('packs') ?? '[]') as string[]
@@ -239,7 +245,6 @@ function Host({
     setContent(value)
   }
   const togglePack = (id: string) => {
-    chooseContent('packs')
     setSelectedPacks((packs) => {
       const next = packs.includes(id) ? packs.filter((p) => p !== id) : [...packs, id]
       save('packs', JSON.stringify(next))
@@ -250,6 +255,10 @@ function Host({
     save('soloSource', value)
     setSoloSource(value)
   }
+
+  useEffect(() => {
+    sessionStorage.removeItem('afterLogin')
+  }, [])
 
   useEffect(() => {
     if (!loggedIn) return
@@ -378,6 +387,7 @@ function Host({
   }, [phase, roomCode, roundNumber, audio, player, current, preview])
 
   const newGame = () => {
+    setShowHome(true)
     localStorage.removeItem(SESSION_KEY)
     setSession(null)
     setRoom(null)
@@ -417,10 +427,13 @@ function Host({
     <div className="app">
       <header className="appbar">
         <Wordmark />
-        <span className={`pill tone-${status.tone}`}>
-          <span className="pill-dot" />
-          {status.text}
-        </span>
+        {/* L'état du son n'a de sens qu'une fois la partie créée, ou pour le lecteur Spotify. */}
+        {(room || audio === 'spotify') && (
+          <span className={`pill tone-${status.tone}`}>
+            <span className="pill-dot" />
+            {status.text}
+          </span>
+        )}
         <span className="appbar-user">
           {loggedIn && (
             <>
@@ -434,12 +447,19 @@ function Host({
       </header>
 
       <main className="page">
-        {!session || !room ? (
+        {(!session || !room) && showHome ? (
+          <HomeScreen
+            onChoose={(value) => {
+              chooseContent(value)
+              setShowHome(false)
+            }}
+          />
+        ) : !session || !room ? (
           <SetupScreen
             setup={setup}
             onSetupChange={chooseSetup}
             content={content}
-            onContentChange={chooseContent}
+            onBack={() => setShowHome(true)}
             selectedPacks={selectedPacks}
             onTogglePack={togglePack}
             soloSource={soloSource}
@@ -516,6 +536,11 @@ function Host({
                     <span>/{room.totalRounds}</span>
                   </div>
                 </div>
+                {room.phase === 'playing' && room.category && (
+                  <p className="category-line">
+                    C'est un <CategoryBadge category={room.category} />
+                  </p>
+                )}
                 {!room.solo && (
                   <div className="round-code">
                     <span className="eyebrow">Code</span>
@@ -604,7 +629,7 @@ function Host({
 
             {room.phase === 'reveal' && room.revealed && (
               <div className="reveal-layout">
-                <TrackReveal track={room.revealed} />
+                <TrackReveal track={room.revealed} category={room.category} />
                 <div className="stack">
                   <Scoreboard room={room} />
                   <button className="btn btn-primary btn-lg" onClick={() => socket.emit('host:nextRound')}>
@@ -648,13 +673,6 @@ const SETUPS: { id: Setup; icon: IconName; title: string; text: string }[] = [
   },
 ]
 
-const PACK_ICONS: Record<string, IconName> = {
-  'jeux-video': 'gamepad',
-  animes: 'sparkle',
-  films: 'film',
-  'dessins-animes': 'tv',
-}
-
 const SOURCES: { id: GameMode; title: string; text: string }[] = [
   { id: 'spotify', title: 'Spotify', text: 'Le vrai morceau, depuis le début' },
   { id: 'deezer', title: 'Deezer', text: 'Plan B si Spotify ne lit pas : extraits de 30 s, silence sauté tout seul' },
@@ -662,11 +680,66 @@ const SOURCES: { id: GameMode; title: string; text: string }[] = [
 
 const ROUND_CHOICES = [5, 10, 15, 20, 30]
 
+/** Accueil : deux jeux bien distincts, le blind test musical (playlists) et le blind test thèmes. */
+function HomeScreen({ onChoose }: { onChoose: (content: Content) => void }) {
+  const art = usePackArt()
+  const themeImages = PACKS.flatMap((pack) => art[pack.id]?.slice(0, 2) ?? []).slice(0, 6)
+  return (
+    <div className="home">
+      <div className="home-intro">
+        <span className="eyebrow">Nouvelle partie</span>
+        <h1 className="display">À quoi on joue ?</h1>
+      </div>
+
+      <button className="game-card game-themes" onClick={() => onChoose('packs')}>
+        <span className="game-text">
+          <span className="game-kicker">Blind test thèmes</span>
+          <span className="game-title">Devine l'œuvre</span>
+          <span className="game-desc">
+            Une musique d'animé, de film, de jeu vidéo ou de dessin animé : trouve d'où elle vient. Plus de 400 œuvres,
+            sans compte à connecter.
+          </span>
+          <span className="game-tags">
+            {PACKS.map((pack) => (
+              <span key={pack.id} className="tag">
+                <Icon name={PACK_ICONS[pack.id] ?? 'list'} size={14} />
+                {pack.title}
+              </span>
+            ))}
+          </span>
+        </span>
+        <span className={`game-visual collage count-${themeImages.length}`} aria-hidden="true">
+          {themeImages.length > 0 ? (
+            themeImages.map((src) => <Cover key={src} src={src} />)
+          ) : (
+            <span className="game-visual-icon">
+              <Icon name="sparkle" size={40} />
+            </span>
+          )}
+        </span>
+      </button>
+
+      <button className="game-card game-music" onClick={() => onChoose('playlist')}>
+        <span className="game-text">
+          <span className="game-kicker">Blind test musical</span>
+          <span className="game-title">Devine le morceau</span>
+          <span className="game-desc">
+            Les morceaux de tes playlists Spotify : trouve le titre le plus vite possible. Connexion à Spotify demandée.
+          </span>
+        </span>
+        <span className="game-visual vinyl" aria-hidden="true">
+          <span className="vinyl-disc" />
+        </span>
+      </button>
+    </div>
+  )
+}
+
 function SetupScreen({
   setup,
   onSetupChange,
   content,
-  onContentChange,
+  onBack,
   selectedPacks,
   onTogglePack,
   soloSource,
@@ -678,7 +751,7 @@ function SetupScreen({
   setup: Setup
   onSetupChange: (setup: Setup) => void
   content: Content
-  onContentChange: (content: Content) => void
+  onBack: () => void
   selectedPacks: string[]
   onTogglePack: (id: string) => void
   soloSource: GameMode
@@ -690,11 +763,13 @@ function SetupScreen({
   const [rounds, setRounds] = useState(10)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const art = usePackArt()
   const packCount = selectedPacks.reduce((n, id) => n + (findPack(id)?.entries.length ?? 0), 0)
+  const themes = content === 'packs'
 
   const createWithPacks = async () => {
     setError(null)
-    setBusy('Recherche des extraits sur Deezer…')
+    setBusy('Recherche des extraits…')
     try {
       await onCreate({ packs: selectedPacks }, rounds)
     } catch (err) {
@@ -704,8 +779,41 @@ function SetupScreen({
     }
   }
 
+  const roundsStep = (num: number) => (
+    <section className="setup-step">
+      <h2 className="step-title">
+        <span className="step-num">{num}</span>
+        Combien de manches ?
+      </h2>
+      <div className="segmented" role="radiogroup">
+        {ROUND_CHOICES.map((n) => (
+          <button
+            key={n}
+            role="radio"
+            aria-checked={rounds === n}
+            className={rounds === n ? 'is-on' : ''}
+            onClick={() => setRounds(n)}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+
   return (
     <div className="setup">
+      <div className="setup-head">
+        <button className="btn btn-ghost back" onClick={onBack}>
+          <span className="back-arrow">
+            <Icon name="arrow" size={16} />
+          </span>
+          Changer de jeu
+        </button>
+        <span className="eyebrow">{themes ? 'Blind test thèmes' : 'Blind test musical'}</span>
+        <h1 className="display">{themes ? "Devine l'œuvre" : 'Devine le morceau'}</h1>
+      </div>
+
       <section className="setup-step">
         <h2 className="step-title">
           <span className="step-num">1</span>Comment on joue ?
@@ -726,51 +834,7 @@ function SetupScreen({
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="setup-step">
-        <h2 className="step-title">
-          <span className="step-num">2</span>Quelles musiques ?
-        </h2>
-        <p className="muted small">Coche un ou plusieurs thèmes à mélanger : on devine le jeu, l'animé, le film…</p>
-        <div className="pack-grid">
-          {PACKS.map((pack) => {
-            const on = content === 'packs' && selectedPacks.includes(pack.id)
-            return (
-              <button
-                key={pack.id}
-                className={`pack ${on ? 'is-selected' : ''}`}
-                onClick={() => onTogglePack(pack.id)}
-                aria-pressed={on}
-              >
-                <span className="pack-check" aria-hidden="true">
-                  {on && <Icon name="check" size={14} />}
-                </span>
-                <span className="pack-icon">
-                  <Icon name={PACK_ICONS[pack.id] ?? 'list'} size={24} />
-                </span>
-                <span className="pack-title">{pack.title}</span>
-                <span className="pack-text">{pack.description}</span>
-                <span className="pack-count">{pack.entries.length} œuvres</span>
-              </button>
-            )
-          })}
-          <button
-            className={`pack pack-playlist ${content === 'playlist' ? 'is-selected' : ''}`}
-            onClick={() => onContentChange('playlist')}
-            aria-pressed={content === 'playlist'}
-          >
-            <span className="pack-check" aria-hidden="true">
-              {content === 'playlist' && <Icon name="check" size={14} />}
-            </span>
-            <span className="pack-icon">
-              <Icon name="list" size={24} />
-            </span>
-            <span className="pack-title">Ma playlist Spotify</span>
-            <span className="pack-text">On devine le titre des morceaux d'une de tes playlists.</span>
-          </button>
-        </div>
-        {setup === 'solo' && content === 'playlist' && (
+        {!themes && setup === 'solo' && (
           <div className="source-picker">
             <span className="field-label">Le son vient de</span>
             <div className="segmented" role="radiogroup">
@@ -791,63 +855,87 @@ function SetupScreen({
         )}
       </section>
 
-      <section className="setup-step">
-        <h2 className="step-title">
-          <span className="step-num">3</span>
-          {setup === 'solo' ? 'Combien de morceaux ?' : 'Combien de manches ?'}
-        </h2>
-        <div className="segmented" role="radiogroup">
-          {ROUND_CHOICES.map((n) => (
-            <button
-              key={n}
-              role="radio"
-              aria-checked={rounds === n}
-              className={rounds === n ? 'is-on' : ''}
-              onClick={() => setRounds(n)}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {content === 'packs' ? (
-        <section className="setup-step">
-          {error && <p className="notice is-bad">{error}</p>}
-          {busy && <p className="notice">{busy}</p>}
-          <div className="create-row">
-            <button
-              className="btn btn-primary btn-lg"
-              disabled={selectedPacks.length === 0 || busy !== null}
-              onClick={createWithPacks}
-            >
-              Créer la partie
-              <Icon name="arrow" size={18} />
-            </button>
-            <span className="muted small">
-              {selectedPacks.length === 0
-                ? 'Choisis au moins un thème.'
-                : `${packNames(selectedPacks)} · ${packCount} œuvres au choix`}
-            </span>
-          </div>
-        </section>
-      ) : (
-        <section className="setup-step">
-          <h2 className="step-title">
-            <span className="step-num">4</span>Quelle playlist ?
-          </h2>
-          {loggedIn ? (
-            <PlaylistChooser rounds={rounds} audio={setup === 'deezer' || (setup === 'solo' && soloSource === 'deezer') ? 'deezer' : 'spotify'} onCreate={onCreate} />
-          ) : (
-            <div className="stack connect">
-              {loginError && <p className="notice is-bad">{loginError}</p>}
-              <p className="muted">Connecte-toi à Spotify pour choisir une de tes playlists.</p>
-              <button className="btn btn-primary" onClick={() => login()}>
-                Se connecter avec Spotify
-              </button>
+      {themes ? (
+        <>
+          <section className="setup-step">
+            <h2 className="step-title">
+              <span className="step-num">2</span>Quels thèmes ?
+            </h2>
+            <p className="muted small">Coche un ou plusieurs thèmes : ils seront mélangés.</p>
+            <div className="pack-grid">
+              {PACKS.map((pack) => {
+                const on = selectedPacks.includes(pack.id)
+                return (
+                  <button
+                    key={pack.id}
+                    className={`pack ${on ? 'is-selected' : ''}`}
+                    onClick={() => onTogglePack(pack.id)}
+                    aria-pressed={on}
+                  >
+                    <ArtMosaic images={art[pack.id] ?? []} icon={PACK_ICONS[pack.id] ?? 'list'} />
+                    <span className="pack-check" aria-hidden="true">
+                      {on && <Icon name="check" size={14} />}
+                    </span>
+                    <span className="pack-body">
+                      <span className="pack-title">
+                        <Icon name={PACK_ICONS[pack.id] ?? 'list'} size={18} />
+                        {pack.title}
+                      </span>
+                      <span className="pack-text">{pack.description}</span>
+                      <span className="pack-count">{pack.entries.length} œuvres</span>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-          )}
-        </section>
+          </section>
+
+          {roundsStep(3)}
+
+          <section className="setup-step">
+            {error && <p className="notice is-bad">{error}</p>}
+            {busy && <p className="notice">{busy}</p>}
+            <div className="create-row">
+              <button
+                className="btn btn-primary btn-lg"
+                disabled={selectedPacks.length === 0 || busy !== null}
+                onClick={createWithPacks}
+              >
+                Créer la partie
+                <Icon name="arrow" size={18} />
+              </button>
+              <span className="muted small">
+                {selectedPacks.length === 0
+                  ? 'Choisis au moins un thème.'
+                  : `${packNames(selectedPacks)} · ${packCount} œuvres au choix`}
+              </span>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          {roundsStep(2)}
+          <section className="setup-step">
+            <h2 className="step-title">
+              <span className="step-num">3</span>Quelle playlist ?
+            </h2>
+            {loggedIn ? (
+              <PlaylistChooser
+                rounds={rounds}
+                audio={setup === 'deezer' || (setup === 'solo' && soloSource === 'deezer') ? 'deezer' : 'spotify'}
+                onCreate={onCreate}
+              />
+            ) : (
+              <div className="stack connect">
+                {loginError && <p className="notice is-bad">{loginError}</p>}
+                <p className="muted">Connecte-toi à Spotify pour choisir une de tes playlists.</p>
+                <button className="btn btn-primary" onClick={() => login()}>
+                  Se connecter avec Spotify
+                </button>
+              </div>
+            )}
+          </section>
+        </>
       )}
     </div>
   )

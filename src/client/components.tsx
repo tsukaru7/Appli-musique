@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { SNIPPET_DURATIONS_MS, type PlayerRoundView, type RoomView, type Track } from '../shared/protocol.ts'
 
 const LAST_STAGE = SNIPPET_DURATIONS_MS.length - 1
@@ -248,6 +248,63 @@ export function Cover({ src }: { src: string }) {
   )
 }
 
+/* ---------- Packs ---------- */
+
+export const PACK_ICONS: Record<string, IconName> = {
+  'jeux-video': 'gamepad',
+  animes: 'sparkle',
+  films: 'film',
+  'dessins-animes': 'tv',
+}
+
+/** Le type d'œuvre de la manche en cours (packs) : « Film », « Animé »… */
+export function CategoryBadge({ category }: { category?: { id: string; label: string } }) {
+  if (!category) return null
+  return (
+    <span className={`category category-${category.id}`}>
+      <Icon name={PACK_ICONS[category.id] ?? 'list'} size={16} />
+      {category.label}
+    </span>
+  )
+}
+
+let packArtRequest: Promise<Record<string, string[]>> | null = null
+
+/** Images des œuvres phares de chaque pack (vide tant qu'elles ne sont pas arrivées). */
+export function usePackArt(): Record<string, string[]> {
+  const [art, setArt] = useState<Record<string, string[]>>({})
+  useEffect(() => {
+    packArtRequest ??= fetch('/api/pack-art')
+      .then((r) => r.json())
+      .catch(() => {
+        packArtRequest = null
+        return {}
+      })
+    let cancelled = false
+    packArtRequest.then((data) => !cancelled && setArt(data))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return art
+}
+
+/** Mosaïque de pochettes (2 × 2) ; l'icône du pack si aucune image n'est disponible. */
+export function ArtMosaic({ images, icon }: { images: string[]; icon: IconName }) {
+  const shown = images.slice(0, 4)
+  return (
+    <span className={`mosaic count-${shown.length}`}>
+      {shown.length === 0 ? (
+        <span className="mosaic-icon">
+          <Icon name={icon} size={30} />
+        </span>
+      ) : (
+        shown.map((src) => <Cover key={src} src={src} />)
+      )}
+    </span>
+  )
+}
+
 /* ---------- Joueurs et scores ---------- */
 
 function statusOf(r: PlayerRoundView | undefined, mode: RoomView['mode']): { icon: IconName; text: string; tone: string } {
@@ -316,12 +373,20 @@ export function Scoreboard({ room, highlightId }: { room: RoomView; highlightId?
   )
 }
 
-export function TrackReveal({ track, compact = false }: { track: Track; compact?: boolean }) {
+export function TrackReveal({
+  track,
+  category,
+  compact = false,
+}: {
+  track: Track
+  category?: { id: string; label: string }
+  compact?: boolean
+}) {
   return (
     <div className={`reveal ${compact ? 'is-compact' : ''}`}>
-      <div className="reveal-cover">{track.albumImage && <Cover src={track.albumImage} />}</div>
+      <div className="reveal-cover">{track.albumImage && <Cover key={track.albumImage} src={track.albumImage} />}</div>
       <div className="reveal-text">
-        <span className="eyebrow">C'était</span>
+        <span className="eyebrow">{category ? `C'était — ${category.label}` : "C'était"}</span>
         <span className="reveal-title">{track.work ?? track.title}</span>
         <span className="reveal-artists">
           {track.work

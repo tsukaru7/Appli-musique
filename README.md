@@ -66,6 +66,10 @@ Projet **privé entre amis**, pas destiné à être publié.
 | Films | 115 films, internationaux et français : Star Wars, Amélie Poulain, La Boum… |
 | Dessins animés | 104 génériques et chansons en français : Goldorak, Le Roi lion… |
 
+- C'est un jeu à part du blind test musical : l'accueil propose les deux (« Devine l'œuvre » et
+  « Devine le morceau »).
+- Pendant la manche, le type d'œuvre est affiché (« C'est un Film »). À la révélation, l'affiche
+  ou la jaquette de l'œuvre est cherchée sur Wikipedia (pochette Deezer à défaut).
 - On devine **l'œuvre** (le jeu, l'animé, le film…), pas le titre du morceau. Les autres noms
   courants sont acceptés (« Back to the Future » pour « Retour vers le futur »).
 - Pas besoin de Spotify : les extraits viennent de Deezer (si le morceau officiel n'y est pas, une

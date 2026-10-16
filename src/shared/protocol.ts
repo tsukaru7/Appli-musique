@@ -70,6 +70,8 @@ export interface RoomView {
   audio: AudioSource
   /** Packs choisis (vide pour une playlist) : on devine alors l'œuvre et non le titre. */
   packs: string[]
+  /** Packs : le type d'œuvre de la manche en cours (« Film », « Animé »…), affiché aux joueurs. */
+  category?: { id: string; label: string }
   phase: Phase
   players: PlayerView[]
   totalRounds: number

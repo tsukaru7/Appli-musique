@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
-import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
+import { CategoryBadge, Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
 import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
 
@@ -173,7 +173,7 @@ export function PlayerApp() {
         {room.phase === 'reveal' && room.revealed && (
           <section className="stack">
             <RoundHeader room={room} />
-            <TrackReveal track={room.revealed} compact />
+            <TrackReveal track={room.revealed} category={room.category} compact />
             <MyResult room={room} playerId={id} />
             <Scoreboard room={room} highlightId={id} />
           </section>
@@ -192,7 +192,8 @@ export function PlayerApp() {
 
 export function RoundHeader({ room, points }: { room: RoomView; points?: number }) {
   return (
-    <div className="round-head">
+    <>
+      <div className="round-head">
       <div>
         <span className="eyebrow">Manche</span>
         <div className="round-count">
@@ -206,7 +207,13 @@ export function RoundHeader({ room, points }: { room: RoomView; points?: number 
           <span className="stake-value">{points}</span>
         </div>
       )}
-    </div>
+      </div>
+      {room.phase === 'playing' && room.category && (
+        <p className="category-line">
+          C'est un <CategoryBadge category={room.category} />
+        </p>
+      )}
+    </>
   )
 }
 

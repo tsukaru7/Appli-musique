@@ -11,7 +11,7 @@ interface DeezerTrack {
   preview?: string
   title?: string
   artist?: { name?: string }
-  album?: { title?: string }
+  album?: { title?: string; cover_xl?: string; cover_big?: string }
   error?: { code?: number; message?: string }
 }
 
@@ -49,21 +49,31 @@ function looksRelated(result: DeezerTrack, track: Track): boolean {
   return wanted.length === 0 || wanted.some((w) => haystack.includes(w))
 }
 
+/** Morceau trouvé sur Deezer : son id, et la pochette de l'album (image de secours). */
+export interface DeezerMatch {
+  id: number
+  cover?: string
+}
+
+function toMatch(t: DeezerTrack): DeezerMatch {
+  return { id: t.id!, cover: t.album?.cover_xl ?? t.album?.cover_big }
+}
+
 /**
  * Retrouve le morceau sur Deezer. Dans l'ordre : par son ISRC, par titre + artiste exacts, puis par
  * des recherches plus larges (vérifiées) — utile pour les packs, où le morceau officiel n'est pas
- * toujours sur Deezer mais une reprise reconnaissable l'est. Renvoie l'id Deezer.
+ * toujours sur Deezer mais une reprise reconnaissable l'est.
  */
-export async function findDeezerTrack(track: Track): Promise<number | null> {
+export async function findDeezerTrack(track: Track): Promise<DeezerMatch | null> {
   if (track.isrc) {
     const found = await deezerGet<DeezerTrack>(`/track/isrc:${encodeURIComponent(track.isrc)}`)
-    if (found.id && found.preview) return found.id
+    if (found.id && found.preview) return toMatch(found)
   }
   const title = track.title.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '')
   const artist = track.artists[0] ?? ''
   if (artist) {
     const exact = await search(`artist:"${artist}" track:"${title}"`, 1)
-    if (exact[0]?.id) return exact[0].id
+    if (exact[0]?.id) return toMatch(exact[0])
   }
   const broad = [
     artist ? `${title} ${artist}` : null,
@@ -73,20 +83,20 @@ export async function findDeezerTrack(track: Track): Promise<number | null> {
   ].filter((q): q is string => q !== null)
   for (const query of broad) {
     const match = (await search(query)).find((r) => looksRelated(r, track))
-    if (match?.id) return match.id
+    if (match?.id) return toMatch(match)
   }
   return null
 }
 
 /**
  * Cherche sur Deezer, dans un ordre aléatoire, assez de morceaux (sans doublons) pour la partie.
- * Renvoie la correspondance « id Spotify → id Deezer » des morceaux trouvés.
+ * Renvoie, pour chaque morceau trouvé (par son id), le morceau Deezer correspondant.
  */
 export async function findPlayableTracks(
   tracks: Track[],
   wanted: number,
   random: () => number = Math.random,
-): Promise<Map<string, number>> {
+): Promise<Map<string, DeezerMatch>> {
   const seen = new Set<string>()
   const candidates = tracks
     .map((t) => ({ t, r: random() }))
@@ -99,14 +109,14 @@ export async function findPlayableTracks(
       return true
     })
 
-  const found = new Map<string, number>()
+  const found = new Map<string, DeezerMatch>()
   let next = 0
   const worker = async () => {
     while (found.size < wanted && next < candidates.length) {
       const track = candidates[next++]
       try {
-        const id = await findDeezerTrack(track)
-        if (id) found.set(track.id, id)
+        const match = await findDeezerTrack(track)
+        if (match) found.set(track.id, match)
       } catch {
         // morceau ignoré si Deezer ne répond pas
       }
