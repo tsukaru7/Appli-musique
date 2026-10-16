@@ -76,6 +76,39 @@ const ICONS = {
       <rect x="16.5" y="14" width="4" height="6.5" rx="1.5" />
     </>
   ),
+  gamepad: (
+    <>
+      <path d="M7 8h10a4.5 4.5 0 0 1 4.3 5.8l-1 3.3a2.4 2.4 0 0 1-4 1L14.5 16h-5l-1.8 2.1a2.4 2.4 0 0 1-4-1l-1-3.3A4.5 4.5 0 0 1 7 8z" />
+      <path d="M8 11v3M6.5 12.5h3" />
+      <circle cx="16" cy="11.5" r=".6" fill="currentColor" />
+      <circle cx="17.5" cy="13.5" r=".6" fill="currentColor" />
+    </>
+  ),
+  sparkle: (
+    <>
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
+      <path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+    </>
+  ),
+  film: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M7.5 4.5v15M16.5 4.5v15M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4" />
+    </>
+  ),
+  tv: (
+    <>
+      <rect x="3" y="7" width="18" height="12.5" rx="2" />
+      <path d="M8.5 3l3.5 4 3.5-4" />
+    </>
+  ),
+  list: (
+    <>
+      <path d="M4 6h11M4 11h11M4 16h7" />
+      <circle cx="17.5" cy="16.5" r="2.5" />
+      <path d="M20 16.5V7l2 1" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>
 
 export type IconName = keyof typeof ICONS
@@ -289,8 +322,12 @@ export function TrackReveal({ track, compact = false }: { track: Track; compact?
       <div className="reveal-cover">{track.albumImage && <Cover src={track.albumImage} />}</div>
       <div className="reveal-text">
         <span className="eyebrow">C'était</span>
-        <span className="reveal-title">{track.title}</span>
-        <span className="reveal-artists">{track.artists.join(', ')}</span>
+        <span className="reveal-title">{track.work ?? track.title}</span>
+        <span className="reveal-artists">
+          {track.work
+            ? [track.title, track.artists.join(', ')].filter(Boolean).join(' — ')
+            : track.artists.join(', ')}
+        </span>
       </div>
     </div>
   )

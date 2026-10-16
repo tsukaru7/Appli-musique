@@ -14,7 +14,15 @@ export interface Track {
   albumImage?: string
   /** Code international de l'enregistrement : sert à retrouver le morceau sur Deezer. */
   isrc?: string
+  /** Packs : l'œuvre à deviner (jeu, animé, film…) et ses autres noms acceptés. */
+  work?: string
+  aliases?: string[]
+  /** Packs : mots ajoutés à la recherche Deezer si le morceau exact n'est pas trouvé. */
+  searchHint?: string
 }
+
+/** D'où vient le son : le lecteur Spotify de l'ordinateur, ou les extraits Deezer. */
+export type AudioSource = 'spotify' | 'deezer'
 
 /**
  * - « spotify » : le son sort de l'ordinateur de l'hôte, tout le monde écoute le même extrait.
@@ -26,6 +34,8 @@ export type GameMode = 'spotify' | 'deezer'
 export interface AnswerOption {
   id: string
   label: string
+  /** Autres noms qui font aussi apparaître cette proposition (ex. titre original d'un film). */
+  aliases?: string[]
 }
 
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'finished'
@@ -57,6 +67,9 @@ export interface RoomView {
   mode: GameMode
   /** Partie solo : l'hôte joue seul sur son écran, personne ne rejoint. */
   solo: boolean
+  audio: AudioSource
+  /** Packs choisis (vide pour une playlist) : on devine alors l'œuvre et non le titre. */
+  packs: string[]
   phase: Phase
   players: PlayerView[]
   totalRounds: number
@@ -69,7 +82,15 @@ export interface RoomView {
 
 export interface ClientToServerEvents {
   'host:create': (
-    payload: { tracks: Track[]; totalRounds: number; mode: GameMode; solo?: boolean; password?: string },
+    payload: {
+      /** Soit une playlist (ses morceaux), soit des packs thématiques. */
+      tracks?: Track[]
+      packs?: string[]
+      totalRounds: number
+      mode: GameMode
+      solo?: boolean
+      password?: string
+    },
     ack: (res: { ok: true; code: string; hostKey: string } | { ok: false; error: string }) => void,
   ) => void
   'host:resume': (payload: { code: string; hostKey: string }, ack: (res: { ok: boolean; error?: string }) => void) => void

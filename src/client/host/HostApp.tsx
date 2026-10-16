@@ -1,9 +1,10 @@
-import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import {
   POINTS_BY_STAGE,
   SNIPPET_DURATIONS_MS,
   type AnswerOption,
+  type AudioSource,
   type GameMode,
   type RoomView,
   type Track,
@@ -25,6 +26,8 @@ import { createPlayerSocket, socket, SocketContext, type GameSocket } from '../s
 import { getMe, getMyPlaylists, getPlaylist, getPlaylistTracks, parsePlaylistId, type PlaylistSummary } from '../spotify/api.ts'
 import { isLoggedIn, login, logout } from '../spotify/auth.ts'
 import { SnippetPlayer } from '../spotify/player.ts'
+import { PreviewPlayer } from '../preview.ts'
+import { findPack, PACKS } from '../../shared/packs/index.ts'
 
 const SESSION_KEY = 'hostSession'
 const PASSWORD_KEY = 'hostPassword'
@@ -83,35 +86,12 @@ export function HostApp() {
     )
   }
 
-  if (!loggedIn) {
-    return (
-      <Splash>
-        <p className="lede">Le blind test entre amis, avec vos playlists Spotify.</p>
-        {loginError && <p className="notice is-bad">{loginError}</p>}
-        <button className="btn btn-primary btn-lg" onClick={() => login()}>
-          Se connecter avec Spotify
-        </button>
-        <ul className="feature-list">
-          <li>
-            <Icon name="phone" />
-            <span>
-              <strong>Mode Deezer</strong> — chacun écoute sur son téléphone, à son rythme.
-            </span>
-          </li>
-          <li>
-            <Icon name="speaker" />
-            <span>
-              <strong>Mode Spotify</strong> — le son sort de l'ordinateur, tout le monde écoute ensemble.
-            </span>
-          </li>
-        </ul>
-      </Splash>
-    )
-  }
-
+  // Spotify n'est demandé que pour jouer avec ses playlists : les packs s'en passent.
   return (
     <Host
       password={password}
+      loggedIn={loggedIn}
+      loginError={loginError}
       onBadPassword={() => {
         localStorage.removeItem(PASSWORD_KEY)
         setPassword('')
@@ -182,12 +162,28 @@ function PasswordGate({ onUnlock }: { onUnlock: (password: string) => void }) {
   )
 }
 
+/** Noms des packs d'une partie, pour l'affichage (« Jeux vidéo + Films »). */
+function packNames(ids: string[]): string {
+  return ids.map((id) => findPack(id)?.title ?? id).join(' + ')
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+function readChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  const saved = localStorage.getItem(key)
+  return allowed.includes(saved as T) ? (saved as T) : fallback
+}
+
 function Host({
   password,
+  loggedIn,
+  loginError,
   onBadPassword,
   onLogout,
 }: {
   password: string
+  loggedIn: boolean
+  loginError: string | null
   onBadPassword: () => void
   onLogout: () => void
 }) {
@@ -199,39 +195,71 @@ function Host({
   const [current, setCurrent] = useState<{ track: Track; stage: number } | null>(null)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [playing, setPlaying] = useState(false)
-  /** Mode Spotify : silence à sauter au début du morceau en cours (réglé par l'hôte). */
+  /** Son Spotify : silence à sauter au début du morceau en cours (réglé par l'hôte). */
   const [skipMs, setSkipMs] = useState(0)
   const skipRef = useRef(0)
-  const [setup, setSetup] = useState<Setup>(() => {
-    const saved = localStorage.getItem('setup')
-    return saved === 'spotify' || saved === 'solo' ? saved : 'deezer'
-  })
-  // En solo on est sur l'ordinateur : Spotify par défaut (morceau joué depuis le début).
-  const [soloSource, setSoloSource] = useState<GameMode>(() =>
-    localStorage.getItem('soloSource') === 'deezer' ? 'deezer' : 'spotify',
-  )
-  const chosenMode: GameMode = setup === 'solo' ? soloSource : setup
-  const mode = room?.mode ?? chosenMode
-  const revealAudio = useRef<HTMLAudioElement | null>(null)
-  const solo = useSoloPlayer(room, userName)
 
+  // Réglages de la partie (gardés d'une fois sur l'autre)
+  const [setup, setSetup] = useState<Setup>(() => readChoice('setup', ['deezer', 'spotify', 'solo'], 'deezer'))
+  const [content, setContent] = useState<Content>(() => readChoice('content', ['packs', 'playlist'], 'packs'))
+  const [selectedPacks, setSelectedPacks] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('packs') ?? '[]') as string[]
+      const valid = saved.filter((id) => findPack(id))
+      return valid.length > 0 ? valid : [PACKS[0].id]
+    } catch {
+      return [PACKS[0].id]
+    }
+  })
+  // En solo avec une playlist, on est sur l'ordinateur : Spotify par défaut (le vrai morceau).
+  const [soloSource, setSoloSource] = useState<GameMode>(() => readChoice('soloSource', ['spotify', 'deezer'], 'spotify'))
+
+  const chosenMode: GameMode =
+    setup === 'solo' ? (content === 'packs' ? 'deezer' : soloSource) : setup === 'spotify' ? 'spotify' : 'deezer'
+  const plannedAudio: AudioSource = content === 'packs' || chosenMode === 'deezer' ? 'deezer' : 'spotify'
+  const mode = room?.mode ?? chosenMode
+  const audio = room?.audio ?? plannedAudio
+  const isSolo = room?.solo ?? setup === 'solo'
+  const solo = useSoloPlayer(room, userName)
+  const preview = useMemo(() => new PreviewPlayer(), [])
+
+  // Valeurs lues par les fonctions de lecture (qui ne doivent pas changer à chaque mise à jour)
+  const roomRef = useRef(room)
+  roomRef.current = room
+  const audioRef = useRef(audio)
+  audioRef.current = audio
+
+  const save = (key: string, value: string) => localStorage.setItem(key, value)
   const chooseSetup = (value: Setup) => {
-    localStorage.setItem('setup', value)
+    save('setup', value)
     setSetup(value)
   }
+  const chooseContent = (value: Content) => {
+    save('content', value)
+    setContent(value)
+  }
+  const togglePack = (id: string) => {
+    chooseContent('packs')
+    setSelectedPacks((packs) => {
+      const next = packs.includes(id) ? packs.filter((p) => p !== id) : [...packs, id]
+      save('packs', JSON.stringify(next))
+      return next
+    })
+  }
   const chooseSoloSource = (value: GameMode) => {
-    localStorage.setItem('soloSource', value)
+    save('soloSource', value)
     setSoloSource(value)
   }
 
   useEffect(() => {
+    if (!loggedIn) return
     getMe()
       .then((me) => setUserName(me.display_name ?? me.id))
       .catch((err) => setPlayerError(err.message))
-  }, [])
+  }, [loggedIn])
 
-  // Le lecteur Spotify n'est démarré qu'en mode Spotify (il ne marche pas sur téléphone).
-  const needsSpotifyPlayer = mode === 'spotify'
+  // Le lecteur Spotify ne sert que quand le son vient de Spotify (il ne marche pas sur téléphone).
+  const needsSpotifyPlayer = loggedIn && audio === 'spotify'
   useEffect(() => {
     if (!needsSpotifyPlayer) return
     setPlayerError(null)
@@ -250,6 +278,8 @@ function Host({
       setPlayer(null)
     }
   }, [needsSpotifyPlayer])
+
+  useEffect(() => () => preview.dispose(), [preview])
 
   // Connexion au serveur de jeu (et reprise de la partie après un rechargement de page)
   useEffect(() => {
@@ -276,43 +306,48 @@ function Host({
     }
   }, [])
 
+  const previewUrl = () => `/api/preview/${roomRef.current?.code}/${roomRef.current?.roundNumber}`
+
+  /** Un seul écran : joue l'extrait du palier pour tout le monde (Spotify ou Deezer). */
   const playSnippet = useCallback(
     async (track: Track, stage: number) => {
-      if (!player) return
       const durationMs = SNIPPET_DURATIONS_MS[stage]
+      const onStart = () => {
+        setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
+        socket.emit('host:snippet', { stage, durationMs })
+      }
       setPlaying(true)
       try {
-        await player.playSnippet(
-          track.uri,
-          durationMs,
-          () => {
-            setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
-            socket.emit('host:snippet', { stage, durationMs })
-          },
-          skipRef.current,
-        )
+        if (audioRef.current === 'deezer') {
+          await preview.play(previewUrl(), durationMs, onStart)
+          await sleep(durationMs)
+        } else if (player) {
+          await player.playSnippet(track.uri, durationMs, onStart, skipRef.current)
+        }
       } catch (err) {
         setPlayerError((err as Error).message)
       } finally {
         setPlaying(false)
       }
     },
-    [player],
+    [player, preview],
   )
 
-  // Nouveau morceau ou nouveau palier : on joue l'extrait automatiquement, après une courte pause.
+  // Un seul écran : nouveau morceau ou nouveau palier, l'extrait se joue tout seul après une courte pause.
   useEffect(() => {
-    if (!current || !player) return
+    if (!current || (audio === 'spotify' && !player)) return
     const timer = setTimeout(() => playSnippet(current.track, current.stage), current.stage === 0 ? 1500 : 1000)
     return () => clearTimeout(timer)
-  }, [current, player, playSnippet])
+  }, [current, player, audio, playSnippet])
 
   // Nouvelle manche : on coupe tout de suite le morceau de la révélation précédente.
   const phase = room?.phase
   const roundNumber = room?.roundNumber
   useEffect(() => {
-    if (player && phase === 'playing') player.stop().catch(() => {})
-  }, [player, phase, roundNumber])
+    if (phase !== 'playing') return
+    player?.stop().catch(() => {})
+    preview.stop()
+  }, [player, preview, phase, roundNumber])
 
   // Le silence sauté ne vaut que pour le morceau en cours.
   useEffect(() => {
@@ -328,27 +363,19 @@ function Host({
     playSnippet(current.track, current.stage)
   }
 
-  // Révélation : on laisse tourner le morceau ; fin de partie : on coupe.
-  useEffect(() => {
-    if (!player || !current) return
-    if (phase === 'reveal') player.playFull(current.track.uri).catch(() => {})
-    if (phase === 'finished') player.stop().catch(() => {})
-  }, [phase, player, current])
-
-  // Mode Deezer : à la révélation, l'écran de l'hôte joue l'extrait pour tout le monde.
+  // Révélation : l'écran de l'hôte joue le morceau pour tout le monde ; fin de partie : on coupe.
   const roomCode = room?.code
   useEffect(() => {
-    if (mode !== 'deezer' || !roomCode) return
-    revealAudio.current ??= new Audio()
-    const audio = revealAudio.current
+    if (!roomCode) return
     if (phase === 'reveal') {
-      audio.src = `/api/preview/${roomCode}/${roundNumber}`
-      audio.currentTime = 0
-      audio.play().catch(() => {})
-    } else {
-      audio.pause()
+      if (audio === 'deezer') preview.playFull(previewUrl()).catch(() => {})
+      else if (player && current) player.playFull(current.track.uri).catch(() => {})
     }
-  }, [mode, phase, roomCode, roundNumber])
+    if (phase === 'finished') {
+      preview.stop()
+      player?.stop().catch(() => {})
+    }
+  }, [phase, roomCode, roundNumber, audio, player, current, preview])
 
   const newGame = () => {
     localStorage.removeItem(SESSION_KEY)
@@ -356,12 +383,12 @@ function Host({
     setRoom(null)
     setCurrent(null)
     player?.stop().catch(() => {})
-    revealAudio.current?.pause()
+    preview.stop()
   }
 
-  const createRoom = (tracks: Track[], totalRounds: number) =>
+  const createRoom = (source: { tracks?: Track[]; packs?: string[] }, totalRounds: number) =>
     new Promise<void>((resolve, reject) => {
-      socket.emit('host:create', { tracks, totalRounds, mode: chosenMode, solo: setup === 'solo', password }, (res) => {
+      socket.emit('host:create', { ...source, totalRounds, mode: chosenMode, solo: setup === 'solo', password }, (res) => {
         if (!res.ok) {
           if (res.error.includes('Mot de passe')) onBadPassword()
           return reject(new Error(res.error))
@@ -374,13 +401,17 @@ function Host({
     })
 
   const status =
-    mode === 'deezer'
-      ? { tone: 'neutral', text: (room?.solo ?? setup === 'solo') ? 'Son Deezer sur cet écran' : 'Son sur les téléphones' }
-      : playerError
-        ? { tone: 'bad', text: playerError }
-        : player
-          ? { tone: 'good', text: 'Lecteur Spotify prêt' }
-          : { tone: 'neutral', text: 'Démarrage du lecteur…' }
+    audio === 'deezer'
+      ? { tone: 'neutral', text: mode === 'deezer' && !isSolo ? 'Son sur les téléphones' : 'Son sur cet écran' }
+      : !loggedIn
+        ? { tone: 'neutral', text: 'Spotify non connecté' }
+        : playerError
+          ? { tone: 'bad', text: playerError }
+          : player
+            ? { tone: 'good', text: 'Lecteur Spotify prêt' }
+            : { tone: 'neutral', text: 'Démarrage du lecteur…' }
+
+  const musicLabel = room && room.packs.length > 0 ? packNames(room.packs) : 'Playlist Spotify'
 
   return (
     <div className="app">
@@ -391,20 +422,30 @@ function Host({
           {status.text}
         </span>
         <span className="appbar-user">
-          <span className="muted">{userName}</span>
-          <button className="btn-icon" onClick={onLogout} title="Se déconnecter de Spotify">
-            <Icon name="logout" size={18} />
-          </button>
+          {loggedIn && (
+            <>
+              <span className="muted">{userName}</span>
+              <button className="btn-icon" onClick={onLogout} title="Se déconnecter de Spotify">
+                <Icon name="logout" size={18} />
+              </button>
+            </>
+          )}
         </span>
       </header>
 
       <main className="page">
         {!session || !room ? (
-          <PlaylistPicker
+          <SetupScreen
             setup={setup}
             onSetupChange={chooseSetup}
+            content={content}
+            onContentChange={chooseContent}
+            selectedPacks={selectedPacks}
+            onTogglePack={togglePack}
             soloSource={soloSource}
             onSoloSourceChange={chooseSoloSource}
+            loggedIn={loggedIn}
+            loginError={loginError}
             onCreate={createRoom}
           />
         ) : room.phase === 'lobby' && room.solo ? (
@@ -412,14 +453,14 @@ function Host({
             <span className="eyebrow">Partie solo</span>
             <h1 className="display">Prêt ?</h1>
             <p className="muted">
-              {room.totalRounds} morceaux à trouver · son {room.mode === 'deezer' ? 'Deezer' : 'Spotify'}
+              {room.totalRounds} {room.packs.length > 0 ? 'œuvres' : 'morceaux'} à trouver · {musicLabel}
             </p>
             <div className="stack">
               <button
                 className="btn btn-primary btn-lg"
-                disabled={!solo || (mode === 'spotify' && !player)}
+                disabled={!solo || (audio === 'spotify' && !player)}
                 onClick={async () => {
-                  if (mode === 'spotify') await player?.activate()
+                  if (audio === 'spotify') await player?.activate()
                   socket.emit('host:start')
                 }}
               >
@@ -427,16 +468,17 @@ function Host({
                 <Icon name="arrow" size={18} />
               </button>
               <button className="btn btn-ghost" onClick={newGame}>
-                Changer de playlist
+                Changer les réglages
               </button>
             </div>
           </section>
         ) : room.phase === 'lobby' ? (
           <Lobby
             room={room}
-            canStart={mode === 'deezer' || player !== null}
+            musicLabel={musicLabel}
+            canStart={audio === 'deezer' || player !== null}
             onStart={async () => {
-              if (mode === 'spotify') await player?.activate()
+              if (audio === 'spotify') await player?.activate()
               socket.emit('host:start')
             }}
             onCancel={newGame}
@@ -539,16 +581,22 @@ function Host({
                       Révéler
                     </button>
                   </div>
-                  <div className="silence">
-                    <span className="muted small">
-                      {skipMs > 0
-                        ? `Départ décalé de ${skipMs / 1000} s pour sauter le silence.`
-                        : 'Le morceau commence par un silence ?'}
-                    </span>
-                    <button className="btn btn-ghost" disabled={!current || playing || skipMs >= 15000} onClick={skipSilence}>
-                      Sauter 1 s de silence
-                    </button>
-                  </div>
+                  {room.audio === 'spotify' && (
+                    <div className="silence">
+                      <span className="muted small">
+                        {skipMs > 0
+                          ? `Départ décalé de ${skipMs / 1000} s pour sauter le silence.`
+                          : 'Le morceau commence par un silence ?'}
+                      </span>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={!current || playing || skipMs >= 15000}
+                        onClick={skipSilence}
+                      >
+                        Sauter 1 s de silence
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <RoundStatusList room={room} />
               </>
@@ -576,26 +624,36 @@ function Host({
 /** Façon de jouer choisie par l'hôte. « solo » : on joue seul sur cet écran. */
 type Setup = 'deezer' | 'spotify' | 'solo'
 
+/** Avec quelles musiques : des packs thématiques, ou une playlist Spotify. */
+type Content = 'packs' | 'playlist'
+
 const SETUPS: { id: Setup; icon: IconName; title: string; text: string }[] = [
   {
     id: 'deezer',
     icon: 'phone',
     title: 'Chacun son téléphone',
-    text: 'Chaque joueur écoute de son côté et avance à son rythme. Extraits Deezer, aucun compte nécessaire.',
+    text: 'Chaque joueur écoute de son côté et avance à son rythme.',
   },
   {
     id: 'spotify',
     icon: 'speaker',
     title: 'Un écran, des téléphones',
-    text: 'Le son sort de cet ordinateur, tout le monde écoute ensemble et répond sur son téléphone. Spotify Premium.',
+    text: 'Le son sort de cet ordinateur : tout le monde écoute ensemble et répond sur son téléphone.',
   },
   {
     id: 'solo',
     icon: 'headphones',
     title: 'Solo sur cet écran',
-    text: "Personne à connecter : tu écoutes et tu réponds ici, comme sur Songless.",
+    text: 'Personne à connecter : tu écoutes et tu réponds ici, comme sur Songless.',
   },
 ]
+
+const PACK_ICONS: Record<string, IconName> = {
+  'jeux-video': 'gamepad',
+  animes: 'sparkle',
+  films: 'film',
+  'dessins-animes': 'tv',
+}
 
 const SOURCES: { id: GameMode; title: string; text: string }[] = [
   { id: 'spotify', title: 'Spotify', text: 'Le vrai morceau, depuis le début' },
@@ -604,57 +662,46 @@ const SOURCES: { id: GameMode; title: string; text: string }[] = [
 
 const ROUND_CHOICES = [5, 10, 15, 20, 30]
 
-function PlaylistPicker({
+function SetupScreen({
   setup,
   onSetupChange,
+  content,
+  onContentChange,
+  selectedPacks,
+  onTogglePack,
   soloSource,
   onSoloSourceChange,
+  loggedIn,
+  loginError,
   onCreate,
 }: {
   setup: Setup
   onSetupChange: (setup: Setup) => void
+  content: Content
+  onContentChange: (content: Content) => void
+  selectedPacks: string[]
+  onTogglePack: (id: string) => void
   soloSource: GameMode
   onSoloSourceChange: (source: GameMode) => void
-  onCreate: (tracks: Track[], totalRounds: number) => Promise<void>
+  loggedIn: boolean
+  loginError: string | null
+  onCreate: (source: { tracks?: Track[]; packs?: string[] }, totalRounds: number) => Promise<void>
 }) {
-  const mode: GameMode = setup === 'solo' ? soloSource : setup
-  const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null)
-  const [link, setLink] = useState('')
   const [rounds, setRounds] = useState(10)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const packCount = selectedPacks.reduce((n, id) => n + (findPack(id)?.entries.length ?? 0), 0)
 
-  useEffect(() => {
-    getMyPlaylists()
-      .then(setPlaylists)
-      .catch((err) => setError(err.message))
-  }, [])
-
-  const choose = async (id: string, name?: string) => {
+  const createWithPacks = async () => {
     setError(null)
-    setBusy(`Chargement de ${name ?? 'la playlist'}…`)
+    setBusy('Recherche des extraits sur Deezer…')
     try {
-      const tracks = await getPlaylistTracks(id)
-      if (tracks.length < 3) throw new Error('Cette playlist contient trop peu de morceaux jouables.')
-      if (mode === 'deezer') setBusy('Recherche des extraits sur Deezer…')
-      await onCreate(tracks, rounds)
+      await onCreate({ packs: selectedPacks }, rounds)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setBusy(null)
     }
-  }
-
-  const chooseLink = async () => {
-    const id = parsePlaylistId(link)
-    if (!id) return setError('Lien invalide. Il doit ressembler à https://open.spotify.com/playlist/…')
-    let name: string | undefined
-    try {
-      name = (await getPlaylist(id)).name
-    } catch {
-      // le nom n'est qu'un bonus pour l'affichage
-    }
-    await choose(id, name)
   }
 
   return (
@@ -679,7 +726,51 @@ function PlaylistPicker({
             </button>
           ))}
         </div>
-        {setup === 'solo' && (
+      </section>
+
+      <section className="setup-step">
+        <h2 className="step-title">
+          <span className="step-num">2</span>Quelles musiques ?
+        </h2>
+        <p className="muted small">Coche un ou plusieurs thèmes à mélanger : on devine le jeu, l'animé, le film…</p>
+        <div className="pack-grid">
+          {PACKS.map((pack) => {
+            const on = content === 'packs' && selectedPacks.includes(pack.id)
+            return (
+              <button
+                key={pack.id}
+                className={`pack ${on ? 'is-selected' : ''}`}
+                onClick={() => onTogglePack(pack.id)}
+                aria-pressed={on}
+              >
+                <span className="pack-check" aria-hidden="true">
+                  {on && <Icon name="check" size={14} />}
+                </span>
+                <span className="pack-icon">
+                  <Icon name={PACK_ICONS[pack.id] ?? 'list'} size={24} />
+                </span>
+                <span className="pack-title">{pack.title}</span>
+                <span className="pack-text">{pack.description}</span>
+                <span className="pack-count">{pack.entries.length} œuvres</span>
+              </button>
+            )
+          })}
+          <button
+            className={`pack pack-playlist ${content === 'playlist' ? 'is-selected' : ''}`}
+            onClick={() => onContentChange('playlist')}
+            aria-pressed={content === 'playlist'}
+          >
+            <span className="pack-check" aria-hidden="true">
+              {content === 'playlist' && <Icon name="check" size={14} />}
+            </span>
+            <span className="pack-icon">
+              <Icon name="list" size={24} />
+            </span>
+            <span className="pack-title">Ma playlist Spotify</span>
+            <span className="pack-text">On devine le titre des morceaux d'une de tes playlists.</span>
+          </button>
+        </div>
+        {setup === 'solo' && content === 'playlist' && (
           <div className="source-picker">
             <span className="field-label">Le son vient de</span>
             <div className="segmented" role="radiogroup">
@@ -702,57 +793,149 @@ function PlaylistPicker({
 
       <section className="setup-step">
         <h2 className="step-title">
-          <span className="step-num">2</span>
+          <span className="step-num">3</span>
           {setup === 'solo' ? 'Combien de morceaux ?' : 'Combien de manches ?'}
         </h2>
         <div className="segmented" role="radiogroup">
           {ROUND_CHOICES.map((n) => (
-            <button key={n} role="radio" aria-checked={rounds === n} className={rounds === n ? 'is-on' : ''} onClick={() => setRounds(n)}>
+            <button
+              key={n}
+              role="radio"
+              aria-checked={rounds === n}
+              className={rounds === n ? 'is-on' : ''}
+              onClick={() => setRounds(n)}
+            >
               {n}
             </button>
           ))}
         </div>
       </section>
 
-      <section className="setup-step">
-        <h2 className="step-title">
-          <span className="step-num">3</span>Quelle playlist ?
-        </h2>
-        <form
-          className="inline-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            chooseLink()
-          }}
-        >
-          <input
-            placeholder="Coller le lien d'une playlist Spotify publique"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-          />
-          <button className="btn" type="submit" disabled={!link || busy !== null}>
-            Utiliser
-          </button>
-        </form>
-
-        {error && <p className="notice is-bad">{error}</p>}
-        {busy && <p className="notice">{busy}</p>}
-
-        {playlists === null && !error ? (
-          <p className="muted">Chargement de tes playlists…</p>
-        ) : (
-          <div className="playlist-grid">
-            {playlists?.map((p) => (
-              <button key={p.id} className="playlist" disabled={busy !== null} onClick={() => choose(p.id, p.name)}>
-                <span className="playlist-cover">{p.image && <Cover src={p.image} />}</span>
-                <span className="playlist-name">{p.name}</span>
-                <span className="playlist-meta">{p.total !== undefined ? `${p.total} titres` : p.owner}</span>
-              </button>
-            ))}
+      {content === 'packs' ? (
+        <section className="setup-step">
+          {error && <p className="notice is-bad">{error}</p>}
+          {busy && <p className="notice">{busy}</p>}
+          <div className="create-row">
+            <button
+              className="btn btn-primary btn-lg"
+              disabled={selectedPacks.length === 0 || busy !== null}
+              onClick={createWithPacks}
+            >
+              Créer la partie
+              <Icon name="arrow" size={18} />
+            </button>
+            <span className="muted small">
+              {selectedPacks.length === 0
+                ? 'Choisis au moins un thème.'
+                : `${packNames(selectedPacks)} · ${packCount} œuvres au choix`}
+            </span>
           </div>
-        )}
-      </section>
+        </section>
+      ) : (
+        <section className="setup-step">
+          <h2 className="step-title">
+            <span className="step-num">4</span>Quelle playlist ?
+          </h2>
+          {loggedIn ? (
+            <PlaylistChooser rounds={rounds} audio={setup === 'deezer' || (setup === 'solo' && soloSource === 'deezer') ? 'deezer' : 'spotify'} onCreate={onCreate} />
+          ) : (
+            <div className="stack connect">
+              {loginError && <p className="notice is-bad">{loginError}</p>}
+              <p className="muted">Connecte-toi à Spotify pour choisir une de tes playlists.</p>
+              <button className="btn btn-primary" onClick={() => login()}>
+                Se connecter avec Spotify
+              </button>
+            </div>
+          )}
+        </section>
+      )}
     </div>
+  )
+}
+
+function PlaylistChooser({
+  rounds,
+  audio,
+  onCreate,
+}: {
+  rounds: number
+  audio: AudioSource
+  onCreate: (source: { tracks?: Track[]; packs?: string[] }, totalRounds: number) => Promise<void>
+}) {
+  const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null)
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getMyPlaylists()
+      .then(setPlaylists)
+      .catch((err) => setError(err.message))
+  }, [])
+
+  const choose = async (id: string, name?: string) => {
+    setError(null)
+    setBusy(`Chargement de ${name ?? 'la playlist'}…`)
+    try {
+      const tracks = await getPlaylistTracks(id)
+      if (tracks.length < 3) throw new Error('Cette playlist contient trop peu de morceaux jouables.')
+      if (audio === 'deezer') setBusy('Recherche des extraits sur Deezer…')
+      await onCreate({ tracks }, rounds)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const chooseLink = async () => {
+    const id = parsePlaylistId(link)
+    if (!id) return setError('Lien invalide. Il doit ressembler à https://open.spotify.com/playlist/…')
+    let name: string | undefined
+    try {
+      name = (await getPlaylist(id)).name
+    } catch {
+      // le nom n'est qu'un bonus pour l'affichage
+    }
+    await choose(id, name)
+  }
+
+  return (
+    <>
+      <form
+        className="inline-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          chooseLink()
+        }}
+      >
+        <input
+          placeholder="Coller le lien d'une playlist Spotify publique"
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+        />
+        <button className="btn" type="submit" disabled={!link || busy !== null}>
+          Utiliser
+        </button>
+      </form>
+
+      {error && <p className="notice is-bad">{error}</p>}
+      {busy && <p className="notice">{busy}</p>}
+
+      {playlists === null && !error ? (
+        <p className="muted">Chargement de tes playlists…</p>
+      ) : (
+        <div className="playlist-grid">
+          {playlists?.map((p) => (
+            <button key={p.id} className="playlist" disabled={busy !== null} onClick={() => choose(p.id, p.name)}>
+              <span className="playlist-cover">{p.image && <Cover src={p.image} />}</span>
+              <span className="playlist-name">{p.name}</span>
+              <span className="playlist-meta">{p.total !== undefined ? `${p.total} titres` : p.owner}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -778,11 +961,13 @@ function useJoinUrl(code: string): string | null {
 
 function Lobby({
   room,
+  musicLabel,
   canStart,
   onStart,
   onCancel,
 }: {
   room: RoomView
+  musicLabel: string
   canStart: boolean
   onStart: () => void
   onCancel: () => void
@@ -833,6 +1018,10 @@ function Lobby({
             <dd>{room.mode === 'deezer' ? 'Chacun son téléphone' : 'Un seul écran'}</dd>
           </div>
           <div>
+            <dt>Musiques</dt>
+            <dd>{musicLabel}</dd>
+          </div>
+          <div>
             <dt>Manches</dt>
             <dd>{room.totalRounds}</dd>
           </div>
@@ -849,7 +1038,7 @@ function Lobby({
             <Icon name="arrow" size={18} />
           </button>
           <button className="btn btn-ghost" onClick={onCancel}>
-            Changer de playlist
+            Changer les réglages
           </button>
         </div>
       </section>
@@ -934,7 +1123,7 @@ function SoloSpotifyRound({
       <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
       {mine?.status !== 'correct' && (
         <>
-          <GuessInput options={options} roundNumber={room.roundNumber} />
+          <GuessInput options={options} roundNumber={room.roundNumber} works={room.packs.length > 0} />
           <button className="btn btn-ghost btn-block" onClick={() => playerSocket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             {room.stage < LAST_STAGE ? `Passer · écouter ${seconds(room.stage + 1)}` : 'Abandonner le morceau'}

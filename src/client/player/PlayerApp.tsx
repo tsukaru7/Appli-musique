@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
 import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
-import { detectSoundStart } from '../audio.ts'
+import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
 
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
@@ -277,7 +277,16 @@ export function WrongGuesses({ guesses }: { guesses: string[] }) {
 }
 
 /** Champ de réponse avec autocomplétion sur les morceaux de la playlist. */
-export function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNumber: number }) {
+export function GuessInput({
+  options,
+  roundNumber,
+  works = false,
+}: {
+  options: AnswerOption[]
+  roundNumber: number
+  /** Packs : on devine une œuvre (jeu, animé, film…) et non un titre. */
+  works?: boolean
+}) {
   const socket = useSocket()
   const [query, setQuery] = useState('')
   const suggestions = useMemo(() => filterOptions(options, query), [options, query])
@@ -299,7 +308,7 @@ export function GuessInput({ options, roundNumber }: { options: AnswerOption[]; 
       >
         <input
           className="guess-input"
-          placeholder="Titre ou artiste…"
+          placeholder={works ? 'Jeu, animé, film, dessin animé…' : 'Titre ou artiste…'}
           value={query}
           autoComplete="off"
           spellCheck={false}
@@ -356,7 +365,7 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
         <p className="result">{mine.status === 'wrong' ? 'Raté.' : 'Passé.'} Attends l'extrait suivant…</p>
       ) : (
         <>
-          <GuessInput options={options} roundNumber={room.roundNumber} />
+          <GuessInput options={options} roundNumber={room.roundNumber} works={room.packs.length > 0} />
           <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             Je ne sais pas
@@ -371,75 +380,48 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
 /** Mode Deezer : chaque téléphone joue son extrait et le joueur avance à son rythme. */
 export function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
   const socket = useSocket()
-  const audio = useRef<HTMLAudioElement>(null)
-  const frame = useRef(0)
-  /** Moment où le son commence vraiment dans l'extrait (on saute le silence du début). */
-  const soundStart = useRef(0)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const preview = useMemo(() => new PreviewPlayer(), [])
+  const [ready, setReady] = useState(false)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const wrongGuesses = useWrongGuesses(room.code, room.roundNumber)
   const src = `/api/preview/${room.code}/${room.roundNumber}`
-
-  // On télécharge l'extrait une fois, et on repère où le son commence.
-  useEffect(() => {
-    let cancelled = false
-    let url: string | null = null
-    setAudioUrl(null)
-    soundStart.current = 0
-    fetch(src)
-      .then((res) => {
-        if (!res.ok) throw new Error('indisponible')
-        return res.arrayBuffer()
-      })
-      .then(async (data) => {
-        const blobUrl = URL.createObjectURL(new Blob([data], { type: 'audio/mpeg' }))
-        const start = await detectSoundStart(data.slice(0))
-        if (cancelled) return URL.revokeObjectURL(blobUrl)
-        url = blobUrl
-        soundStart.current = start
-        setAudioUrl(blobUrl)
-      })
-      .catch(() => !cancelled && setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant."))
-    return () => {
-      cancelled = true
-      if (url) URL.revokeObjectURL(url)
-    }
-  }, [src])
   const mine = room.roundResults.find((r) => r.playerId === playerId)
   const stage = mine?.stage ?? 0
   const done = mine?.status === 'correct' || mine?.status === 'out'
   const lastStage = SNIPPET_DURATIONS_MS.length - 1
 
-  const stop = useCallback(() => {
-    cancelAnimationFrame(frame.current)
-    audio.current?.pause()
-  }, [])
+  // On télécharge l'extrait dès le début de la manche (et on repère où le son commence).
+  useEffect(() => {
+    let cancelled = false
+    setReady(false)
+    preview.load(src).then(
+      () => !cancelled && setReady(true),
+      () => !cancelled && setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant."),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [preview, src])
+
+  useEffect(() => () => preview.dispose(), [preview])
+
+  const stop = useCallback(() => preview.stop(), [preview])
 
   /** Joue le début de l'extrait et le coupe pile à la bonne durée. */
   const play = useCallback(
     async (s: number) => {
-      const el = audio.current
-      if (!el) return
       const durationMs = SNIPPET_DURATIONS_MS[s]
-      const start = soundStart.current
-      stop()
-      el.currentTime = start
       try {
-        await el.play()
+        await preview.play(src, durationMs, () => {
+          setError(null)
+          setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
+        })
       } catch {
         setError("Impossible de lire l'extrait. Touche le bouton pour réessayer.")
-        return
       }
-      setError(null)
-      setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
-      const tick = () => {
-        if (el.paused || (el.currentTime - start) * 1000 >= durationMs) el.pause()
-        else frame.current = requestAnimationFrame(tick)
-      }
-      tick()
     },
-    [stop],
+    [preview, src],
   )
 
   // Après une erreur ou un « passer », on joue directement l'extrait plus long.
@@ -457,7 +439,6 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
 
   return (
     <section className="stack">
-      <audio ref={audio} preload="auto" src={audioUrl ?? undefined} />
       <RoundHeader room={room} points={done ? undefined : POINTS_BY_STAGE[stage]} />
 
       {mine?.status === 'correct' ? (
@@ -480,14 +461,14 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
         <>
           <PlayRing
             onClick={() => play(stage)}
-            disabled={!audioUrl}
-            label={audioUrl ? `Écouter ${seconds(stage)}` : 'Chargement de l’extrait…'}
+            disabled={!ready}
+            label={ready ? `Écouter ${seconds(stage)}` : 'Chargement de l’extrait…'}
             progressKey={progress?.key}
             progressMs={progress?.ms}
           />
           <StageBar stage={stage} progressKey={progress?.key} progressMs={progress?.ms} />
           {error && <p className="notice is-bad">{error}</p>}
-          <GuessInput options={options} roundNumber={room.roundNumber} />
+          <GuessInput options={options} roundNumber={room.roundNumber} works={room.packs.length > 0} />
           <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             {stage < lastStage ? `Passer · écouter ${seconds(stage + 1)}` : 'Abandonner la manche'}

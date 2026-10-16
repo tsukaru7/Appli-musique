@@ -5,9 +5,17 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { Server, type Socket } from 'socket.io'
 import { buildAnswerOptions } from '../shared/answers.ts'
-import type { AnswerOption, ClientToServerEvents, GameMode, ServerToClientEvents, Track } from '../shared/protocol.ts'
+import type {
+  AnswerOption,
+  AudioSource,
+  ClientToServerEvents,
+  GameMode,
+  ServerToClientEvents,
+  Track,
+} from '../shared/protocol.ts'
 import { fetchPreview, findPlayableTracks } from './deezer.ts'
 import { Game, type Change } from './game.ts'
+import { findPack } from '../shared/packs/index.ts'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const PRODUCTION = process.argv.includes('--production') || process.env.NODE_ENV === 'production'
@@ -172,11 +180,12 @@ function afterChange(room: Room, change: Change): void {
   broadcast(room)
   const { game } = room
   if (!change.playNext || !game.current) return
-  if (game.mode === 'spotify') {
-    if (room.hostSocketId) io.to(room.hostSocketId).emit('host:track', { track: game.current, stage: game.stage })
-    return
+  // Un seul écran : c'est l'hôte qui joue l'extrait, il doit savoir lequel.
+  if (game.mode === 'spotify' && room.hostSocketId) {
+    io.to(room.hostSocketId).emit('host:track', { track: game.current, stage: game.stage })
   }
-  // Mode Deezer : on garde seulement l'extrait de la nouvelle manche, téléchargé à l'avance.
+  if (game.audio !== 'deezer') return
+  // Extraits Deezer : on garde seulement celui de la nouvelle manche, téléchargé à l'avance.
   const deezerId = room.deezerIds.get(game.current.id)
   if (deezerId === undefined) return
   for (const id of room.previews.keys()) if (id !== deezerId) room.previews.delete(id)
@@ -188,6 +197,22 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<stri
 function hostRoom(socket: GameSocket): Room | undefined {
   if (socket.data.role !== 'host' || !socket.data.code) return undefined
   return rooms.get(socket.data.code)
+}
+
+/** Morceaux des packs choisis : la réponse attendue est l'œuvre (jeu, animé, film…). */
+function tracksFromPacks(ids: string[]): Track[] {
+  return ids.flatMap((id) => {
+    const pack = findPack(id)!
+    return pack.entries.map(([work, title, artist, aliases], i) => ({
+      id: `${id}:${i}`,
+      uri: '',
+      title,
+      artists: artist ? [artist] : [],
+      work,
+      aliases,
+      searchHint: pack.searchHint,
+    }))
+  })
 }
 
 function sanitizeTracks(tracks: unknown): Track[] {
@@ -208,31 +233,40 @@ function sanitizeTracks(tracks: unknown): Track[] {
 io.on('connection', (socket: GameSocket) => {
   const ip = String(socket.handshake.headers['x-forwarded-for'] ?? socket.handshake.address).split(',')[0].trim()
 
-  socket.on('host:create', async ({ tracks, totalRounds, mode, solo, password }, ack) => {
+  socket.on('host:create', async ({ tracks, packs, totalRounds, mode, solo, password }, ack) => {
     if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     if (!checkPassword(password)) {
       recordFailure(ip)
       return ack({ ok: false, error: 'Mot de passe hôte incorrect.' })
     }
-    const clean = sanitizeTracks(tracks)
+    const packIds = Array.isArray(packs) ? packs.filter((id) => typeof id === 'string' && findPack(id)) : []
+    const clean = packIds.length > 0 ? tracksFromPacks(packIds) : sanitizeTracks(tracks)
     if (clean.length === 0) return ack({ ok: false, error: 'La playlist ne contient aucun morceau jouable.' })
     const gameMode: GameMode = mode === 'deezer' ? 'deezer' : 'spotify'
+    // Les packs n'existent pas sur Spotify : leurs extraits viennent toujours de Deezer.
+    const audio: AudioSource = packIds.length > 0 || gameMode === 'deezer' ? 'deezer' : 'spotify'
     const rounds = Number(totalRounds) || 10
 
     let playable = clean
     let deezerIds = new Map<string, number>()
-    if (gameMode === 'deezer') {
+    if (audio === 'deezer') {
       // On cherche quelques morceaux de plus que nécessaire, au cas où un extrait serait indisponible.
       deezerIds = await findPlayableTracks(clean, rounds + 5)
       playable = clean.filter((t) => deezerIds.has(t.id))
       if (playable.length === 0) {
-        return ack({ ok: false, error: "Aucun morceau de cette playlist n'a été trouvé sur Deezer." })
+        return ack({ ok: false, error: "Aucun morceau n'a été trouvé sur Deezer. Réessaie dans un instant." })
       }
     }
 
     const code = newCode()
     const room: Room = {
-      game: new Game(code, playable, rounds, { mode: gameMode, solo: solo === true, answerTracks: clean }),
+      game: new Game(code, playable, rounds, {
+        mode: gameMode,
+        audio,
+        packs: packIds,
+        solo: solo === true,
+        answerTracks: clean,
+      }),
       hostKey: randomBytes(16).toString('hex'),
       hostSocketId: socket.id,
       options: buildAnswerOptions(clean),

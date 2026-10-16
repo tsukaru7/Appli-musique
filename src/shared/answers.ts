@@ -19,12 +19,19 @@ export function normalizeText(text: string): string {
     .trim()
 }
 
-/** Clé « titre + artiste principal » : deux versions du même morceau (single / album) ont la même clé. */
-export function trackKey(track: Pick<Track, 'title' | 'artists'>): string {
+type Answerable = Pick<Track, 'title' | 'artists' | 'work'>
+
+/**
+ * Clé de la réponse attendue : titre + artiste principal (deux versions du même morceau ont la même
+ * clé), ou l'œuvre seule pour les packs (n'importe quel morceau de l'œuvre est la bonne réponse).
+ */
+export function trackKey(track: Answerable): string {
+  if (track.work) return `work:${normalizeText(track.work)}`
   return `${normalizeTitle(track.title)}|${normalizeTitle(track.artists[0] ?? '')}`
 }
 
-export function trackLabel(track: Pick<Track, 'title' | 'artists'>): string {
+export function trackLabel(track: Answerable): string {
+  if (track.work) return track.work
   return `${track.title} — ${track.artists.join(', ')}`
 }
 
@@ -36,7 +43,7 @@ export function buildAnswerOptions(tracks: Track[]): AnswerOption[] {
     const key = trackKey(track)
     if (seen.has(key)) continue
     seen.add(key)
-    options.push({ id: track.id, label: trackLabel(track) })
+    options.push({ id: track.id, label: trackLabel(track), aliases: track.aliases?.length ? track.aliases : undefined })
   }
   return options.sort((a, b) => a.label.localeCompare(b.label, 'fr'))
 }
@@ -47,7 +54,7 @@ export function filterOptions(options: AnswerOption[], query: string, limit = 8)
   if (words.length === 0) return []
   const result: AnswerOption[] = []
   for (const option of options) {
-    const label = normalizeText(option.label)
+    const label = [option.label, ...(option.aliases ?? [])].map(normalizeText).join(' | ')
     if (words.every((w) => label.includes(w))) {
       result.push(option)
       if (result.length >= limit) break
@@ -68,6 +75,10 @@ export function isCorrectAnswer(
   if (guess.optionId) {
     const picked = tracksById.get(guess.optionId)
     return picked !== undefined && trackKey(picked) === trackKey(answer)
+  }
+  if (guess.text && answer.work) {
+    const text = normalizeText(guess.text)
+    return text.length > 0 && [answer.work, ...(answer.aliases ?? [])].some((name) => normalizeText(name) === text)
   }
   if (guess.text) {
     const text = normalizeTitle(guess.text)

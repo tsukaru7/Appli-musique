@@ -1323,6 +1323,112 @@ input:focus {
   align-self: flex-start;
 }
 
+/* ---------- Packs ---------- */
+
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.pack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+
+.pack:hover {
+  border-color: var(--line-strong);
+}
+
+.pack:active {
+  transform: scale(0.98);
+}
+
+.pack.is-selected {
+  border-color: var(--accent);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+}
+
+.pack-check {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--on-accent);
+}
+
+.pack.is-selected .pack-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.pack-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  background: var(--surface-3);
+}
+
+.pack.is-selected .pack-icon {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.pack-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.pack-text {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.pack-count {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.pack-playlist {
+  border-style: dashed;
+}
+
+.create-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.connect {
+  align-items: flex-start;
+}
+
 /* ---------- Solo ---------- */
 
 .source-picker {

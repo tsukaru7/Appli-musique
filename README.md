@@ -55,6 +55,23 @@ Projet **privé entre amis**, pas destiné à être publié.
   en secours (extraits de 30 s, silence du début sauté automatiquement).
 - À la fin : le score sur le total possible.
 
+### 🎮 Packs thématiques
+
+À la place d'une playlist, on peut cocher un ou plusieurs packs, et les mélanger :
+
+| Pack | Contenu |
+|---|---|
+| Jeux vidéo | 104 jeux : Mario, Zelda, Final Fantasy, Minecraft, Undertale… |
+| Animés | 104 génériques d'animés japonais : Naruto, One Piece, Demon Slayer… |
+| Films | 115 films, internationaux et français : Star Wars, Amélie Poulain, La Boum… |
+| Dessins animés | 104 génériques et chansons en français : Goldorak, Le Roi lion… |
+
+- On devine **l'œuvre** (le jeu, l'animé, le film…), pas le titre du morceau. Les autres noms
+  courants sont acceptés (« Back to the Future » pour « Retour vers le futur »).
+- Pas besoin de Spotify : les extraits viennent de Deezer (si le morceau officiel n'y est pas, une
+  version reconnaissable est cherchée). Ça marche dans les trois façons de jouer.
+- Les listes sont dans `src/shared/packs/` : une ligne par morceau, faciles à corriger ou compléter.
+
 Dans les modes à plusieurs, les joueurs rejoignent la partie via un code ou un QR code, dans le
 navigateur, sans rien installer et sans compte. Ils répondent avec une **autocomplétion** sur
 les titres de la playlist.
@@ -89,7 +106,10 @@ les titres de la playlist.
 - [ ] Mode solo
 - [ ] Options de partie : nombre de manches, paliers de durée, deviner le titre et/ou l'artiste
 
-### Version 3 — Bonus
+### Version 3 — Thèmes
+- [x] Packs jeux vidéo, animés, films et dessins animés, mélangeables
+
+### Version 4 — Bonus
 - [ ] Défi du jour (même morceau pour tout le monde)
 - [ ] Historique des parties et statistiques par joueur
 

@@ -1,5 +1,5 @@
 // Extraits audio de 30 secondes fournis publiquement par Deezer (aucun compte nécessaire).
-import { trackKey } from '../shared/answers.ts'
+import { normalizeText, trackKey } from '../shared/answers.ts'
 import type { Track } from '../shared/protocol.ts'
 
 const DEEZER_API = process.env.DEEZER_API ?? 'https://api.deezer.com'
@@ -9,6 +9,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 interface DeezerTrack {
   id?: number
   preview?: string
+  title?: string
+  artist?: { name?: string }
+  album?: { title?: string }
   error?: { code?: number; message?: string }
 }
 
@@ -23,19 +26,56 @@ async function deezerGet<T extends { error?: DeezerTrack['error'] }>(path: strin
   return data
 }
 
-/** Retrouve le morceau sur Deezer (par son ISRC, sinon par titre + artiste). Renvoie son id Deezer. */
+async function search(query: string, limit = 5): Promise<DeezerTrack[]> {
+  const result = await deezerGet<{ data?: DeezerTrack[]; error?: DeezerTrack['error'] }>(
+    `/search?limit=${limit}&q=${encodeURIComponent(query)}`,
+  )
+  return (result.data ?? []).filter((t) => t.id && t.preview)
+}
+
+const STOP_WORDS = new Set(['the', 'and', 'les', 'des', 'une', 'pour', 'from', 'main', 'theme', 'with', 'dans'])
+
+/** Mots significatifs d'un texte (pour vérifier qu'un résultat de recherche a un rapport). */
+function keywords(text: string): string[] {
+  return normalizeText(text)
+    .split(' ')
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w))
+}
+
+/** Un résultat de recherche « large » n'est gardé que s'il partage un mot avec le morceau ou l'œuvre. */
+function looksRelated(result: DeezerTrack, track: Track): boolean {
+  const haystack = normalizeText(`${result.title ?? ''} ${result.album?.title ?? ''} ${result.artist?.name ?? ''}`)
+  const wanted = [...keywords(track.title), ...keywords(track.work ?? '')]
+  return wanted.length === 0 || wanted.some((w) => haystack.includes(w))
+}
+
+/**
+ * Retrouve le morceau sur Deezer. Dans l'ordre : par son ISRC, par titre + artiste exacts, puis par
+ * des recherches plus larges (vérifiées) — utile pour les packs, où le morceau officiel n'est pas
+ * toujours sur Deezer mais une reprise reconnaissable l'est. Renvoie l'id Deezer.
+ */
 export async function findDeezerTrack(track: Track): Promise<number | null> {
   if (track.isrc) {
     const found = await deezerGet<DeezerTrack>(`/track/isrc:${encodeURIComponent(track.isrc)}`)
     if (found.id && found.preview) return found.id
   }
   const title = track.title.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '')
-  const query = `artist:"${track.artists[0] ?? ''}" track:"${title}"`
-  const search = await deezerGet<{ data?: DeezerTrack[]; error?: DeezerTrack['error'] }>(
-    `/search?limit=1&q=${encodeURIComponent(query)}`,
-  )
-  const first = search.data?.find((t) => t.id && t.preview)
-  return first?.id ?? null
+  const artist = track.artists[0] ?? ''
+  if (artist) {
+    const exact = await search(`artist:"${artist}" track:"${title}"`, 1)
+    if (exact[0]?.id) return exact[0].id
+  }
+  const broad = [
+    artist ? `${title} ${artist}` : null,
+    track.work && track.searchHint ? `${track.searchHint} ${track.work}` : null,
+    track.work ? `${track.work} ${title}` : null,
+    track.work ? `${track.work} theme` : null,
+  ].filter((q): q is string => q !== null)
+  for (const query of broad) {
+    const match = (await search(query)).find((r) => looksRelated(r, track))
+    if (match?.id) return match.id
+  }
+  return null
 }
 
 /**
