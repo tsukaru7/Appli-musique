@@ -16,6 +16,7 @@ import { Avatar } from '../avatar.tsx'
 import { AVATAR_GROUPS, AVATAR_IDS, AVATARS, defaultAvatar, findAvatar, isAvatar } from '../../shared/avatars.ts'
 import { PreviewPlayer } from '../preview.ts'
 import { socket, useSocket } from '../socket.ts'
+import { useMine, useYours, WhoLobby, WhoPhoneReveal, WhoVote } from './WhoPlayer.tsx'
 
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
 function playerId(): string {
@@ -57,6 +58,9 @@ export function PlayerApp() {
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<AnswerOption[]>([])
   const [room, setRoom] = useState<RoomView | null>(null)
+  // « Qui a mis ce son ? » : mes morceaux, et la manche où c'est le mien.
+  const mine = useMine()
+  const yours = useYours()
 
   const join = useCallback(
     (joinCode: string, joinName: string, joinAvatar: string) => {
@@ -163,7 +167,10 @@ export function PlayerApp() {
       </header>
 
       <main className="page">
-        {room.phase === 'lobby' && (
+        {room.kind === 'whois' && room.phase === 'lobby' && <WhoLobby room={room} playerId={id} mine={mine} />}
+        {room.kind === 'whois' && room.phase === 'playing' && <WhoVote room={room} playerId={id} yours={yours} />}
+        {room.kind === 'whois' && room.phase === 'reveal' && <WhoPhoneReveal room={room} playerId={id} />}
+        {room.kind !== 'whois' && room.phase === 'lobby' && (
           <section className="waiting">
             <span className="eyebrow">Tu es dans la partie</span>
             <h1 className="display">Ça commence bientôt</h1>
@@ -171,13 +178,14 @@ export function PlayerApp() {
             <PlayerTiles players={room.players} meId={id} />
           </section>
         )}
-        {room.phase === 'playing' &&
+        {room.kind !== 'whois' &&
+          room.phase === 'playing' &&
           (room.mode === 'deezer' ? (
             <DeezerRound room={room} playerId={id} options={options} />
           ) : (
             <Round room={room} playerId={id} options={options} />
           ))}
-        {room.phase === 'reveal' && room.revealed && (
+        {room.kind !== 'whois' && room.phase === 'reveal' && room.revealed && (
           <section className="stack">
             <RoundHeader room={room} />
             <TrackReveal track={room.revealed} category={room.category} compact />

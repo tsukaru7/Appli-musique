@@ -13,8 +13,16 @@ import type {
   ServerToClientEvents,
   Track,
 } from '../shared/protocol.ts'
-import { fetchPreview, findDeezerTrack, findPlayableTracks, searchTracks, type DeezerMatch } from './deezer.ts'
+import {
+  fetchPreview,
+  findDeezerTrack,
+  findPlayableTracks,
+  getDeezerTrack,
+  searchTracks,
+  type DeezerMatch,
+} from './deezer.ts'
 import { Game, type Change } from './game.ts'
+import { WhoGame } from './whogame.ts'
 import { findPack, packOfTrack } from '../shared/packs/index.ts'
 import { findWorkImage, getPackArt } from './images.ts'
 import { defaultAvatar, isAvatar } from '../shared/avatars.ts'
@@ -60,7 +68,7 @@ function recordFailure(ip: string): void {
 const TOO_MANY = 'Trop d’essais ratés. Réessaie dans quelques minutes.'
 
 interface Room {
-  game: Game
+  game: Game | WhoGame
   hostKey: string
   hostSocketId?: string
   options: AnswerOption[]
@@ -320,6 +328,15 @@ function afterChange(room: Room, change: Change): void {
   broadcast(room)
   const { game } = room
   if (!change.playNext || !game.current) return
+  // « Qui a mis ce son ? » : on prévient discrètement celui dont c'est le morceau.
+  if (game instanceof WhoGame) {
+    const owner = game.ownerOf(game.current)
+    for (const s of io.sockets.sockets.values()) {
+      if (s.data.code === game.code && s.data.role === 'player' && s.data.playerId === owner) {
+        s.emit('whois:yours', { roundNumber: game.roundNumber })
+      }
+    }
+  }
   if (game.current.work && !game.current.albumImage) loadWorkImage(room, game.current)
   // Un seul écran : c'est l'hôte qui joue l'extrait, il doit savoir lequel.
   if (game.mode === 'spotify' && room.hostSocketId) {
@@ -404,11 +421,31 @@ function sanitizeTracks(tracks: unknown): Track[] {
 io.on('connection', (socket: GameSocket) => {
   const ip = String(socket.handshake.headers['x-forwarded-for'] ?? socket.handshake.address).split(',')[0].trim()
 
-  socket.on('host:create', async ({ tracks, packs, totalRounds, mode, solo, password }, ack) => {
+  socket.on('host:create', async ({ tracks, packs, whois, totalRounds, mode, solo, password }, ack) => {
     if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     if (!checkPassword(password)) {
       recordFailure(ip)
       return ack({ ok: false, error: 'Mot de passe hôte incorrect.' })
+    }
+    // « Qui a mis ce son ? » : la playlist se remplit ensuite, avec les choix des joueurs.
+    if (whois) {
+      const code = newCode()
+      const room: Room = {
+        game: new WhoGame(code, Number(whois.perPlayer) || 2),
+        hostKey: randomBytes(16).toString('hex'),
+        hostSocketId: socket.id,
+        options: [],
+        lastActivity: Date.now(),
+        deezerIds: new Map(),
+        covers: new Map(),
+        previews: new Map(),
+      }
+      rooms.set(code, room)
+      socket.data = { code, role: 'host' }
+      socket.join(code)
+      ack({ ok: true, code, hostKey: room.hostKey })
+      broadcast(room)
+      return
     }
     const packIds = Array.isArray(packs) ? packs.filter((id) => typeof id === 'string' && findPack(id)) : []
     const clean = packIds.length > 0 ? tracksFromPacks(packIds) : sanitizeTracks(tracks)
@@ -515,13 +552,88 @@ io.on('connection', (socket: GameSocket) => {
     socket.join(room.game.code)
     room.game.join(id, cleanName, isAvatar(avatar) ? avatar : defaultAvatar(id))
     ack({ ok: true, options: room.options })
+    const { game } = room
+    if (game instanceof WhoGame) {
+      socket.emit('whois:mine', { tracks: game.mine(id) })
+      if (game.phase === 'playing' && game.current && game.ownerOf(game.current) === id) {
+        socket.emit('whois:yours', { roundNumber: game.roundNumber })
+      }
+    }
     broadcast(room)
+  })
+
+  /** Le joueur et sa partie « Qui a mis ce son ? », s'il en a une. */
+  const whoContext = () => {
+    const { code, playerId, role } = socket.data
+    const room = code ? rooms.get(code) : undefined
+    if (!room || role !== 'player' || !playerId || !(room.game instanceof WhoGame)) return null
+    return { room, game: room.game, playerId }
+  }
+  let lastSearch = 0
+
+  socket.on('whois:search', async ({ query }, ack) => {
+    if (!whoContext() || typeof ack !== 'function') return
+    const q = String(query ?? '').trim().slice(0, 120)
+    // Pas plus d'une recherche toutes les 400 ms par joueur.
+    if (!q || Date.now() - lastSearch < 400) return ack([])
+    lastSearch = Date.now()
+    const results = await searchTracks(q).catch(() => [])
+    ack(
+      results.map((m) => ({
+        deezerId: m.id,
+        title: m.title,
+        artist: m.artist,
+        album: m.album,
+        cover: m.cover,
+        preview: m.preview,
+      })),
+    )
+  })
+
+  socket.on('whois:add', async ({ deezerId }, ack) => {
+    const ctx = whoContext()
+    if (!ctx || typeof ack !== 'function') return
+    const id = Number(deezerId)
+    if (!Number.isInteger(id)) return ack({ ok: false, error: 'Morceau invalide.' })
+    const match = await getDeezerTrack(id).catch(() => null)
+    if (!match) return ack({ ok: false, error: "Ce morceau n'a pas d'extrait sur Deezer, choisis-en un autre." })
+    const track: Track = {
+      id: `qui:${match.id}`,
+      uri: '',
+      title: match.title,
+      artists: [match.artist],
+      albumImage: match.cover,
+    }
+    const res = ctx.game.add(ctx.playerId, track)
+    if (!res.ok) return ack(res)
+    ctx.room.deezerIds.set(track.id, match.id)
+    ack({ ok: true })
+    socket.emit('whois:mine', { tracks: ctx.game.mine(ctx.playerId) })
+    broadcast(ctx.room)
+  })
+
+  socket.on('whois:remove', ({ trackId }) => {
+    const ctx = whoContext()
+    if (!ctx) return
+    ctx.game.remove(ctx.playerId, String(trackId))
+    socket.emit('whois:mine', { tracks: ctx.game.mine(ctx.playerId) })
+    broadcast(ctx.room)
+  })
+
+  socket.on('player:vote', ({ targetId }) => {
+    const ctx = whoContext()
+    if (!ctx) return
+    const result = ctx.game.vote(ctx.playerId, String(targetId))
+    if (!result) return
+    const target = ctx.game.players.get(String(targetId))
+    socket.emit('player:feedback', { correct: result.correct, guessLabel: target?.name ?? '', points: result.points })
+    afterChange(ctx.room, result.change)
   })
 
   socket.on('player:guess', (guess) => {
     const { code, playerId, role } = socket.data
     const room = code ? rooms.get(code) : undefined
-    if (!room || role !== 'player' || !playerId) return
+    if (!room || role !== 'player' || !playerId || !(room.game instanceof Game)) return
     const { result, change } = room.game.guess(playerId, {
       optionId: typeof guess?.optionId === 'string' ? guess.optionId : undefined,
       text: typeof guess?.text === 'string' ? guess.text.slice(0, 200) : undefined,
@@ -533,7 +645,7 @@ io.on('connection', (socket: GameSocket) => {
   socket.on('player:pass', () => {
     const { code, playerId, role } = socket.data
     const room = code ? rooms.get(code) : undefined
-    if (!room || role !== 'player' || !playerId) return
+    if (!room || role !== 'player' || !playerId || !(room.game instanceof Game)) return
     afterChange(room, room.game.pass(playerId))
   })
 

@@ -32,6 +32,8 @@ import { getMe, getMyPlaylists, getPlaylist, getPlaylistTracks, parsePlaylistId,
 import { isLoggedIn, login, logout } from '../spotify/auth.ts'
 import { SnippetPlayer } from '../spotify/player.ts'
 import { PreviewPlayer } from '../preview.ts'
+import { Avatar } from '../avatar.tsx'
+import { WhoReveal, WhoRound, WhoSetup } from './WhoHost.tsx'
 import { findPack, PACKS } from '../../shared/packs/index.ts'
 
 const SESSION_KEY = 'hostSession'
@@ -210,7 +212,7 @@ function Host({
 
   // Réglages de la partie (gardés d'une fois sur l'autre)
   const [setup, setSetup] = useState<Setup>(() => readChoice('setup', ['deezer', 'spotify', 'solo'], 'deezer'))
-  const [content, setContent] = useState<Content>(() => readChoice('content', ['packs', 'playlist'], 'packs'))
+  const [content, setContent] = useState<Content>(() => readChoice('content', ['packs', 'playlist', 'whois'], 'packs'))
   // On revient sur l'accueil à chaque nouvelle partie, sauf au retour de la connexion Spotify.
   const [showHome, setShowHome] = useState(() => !sessionStorage.getItem('afterLogin'))
   const [selectedPacks, setSelectedPacks] = useState<string[]>(() => {
@@ -225,9 +227,19 @@ function Host({
   // En solo avec une playlist, on est sur l'ordinateur : Spotify par défaut (le vrai morceau).
   const [soloSource, setSoloSource] = useState<GameMode>(() => readChoice('soloSource', ['spotify', 'deezer'], 'spotify'))
 
+  // « Qui a mis ce son ? » : toujours le son sur cet écran, en extraits Deezer.
   const chosenMode: GameMode =
-    setup === 'solo' ? (content === 'packs' ? 'deezer' : soloSource) : setup === 'spotify' ? 'spotify' : 'deezer'
-  const plannedAudio: AudioSource = content === 'packs' || chosenMode === 'deezer' ? 'deezer' : 'spotify'
+    content === 'whois'
+      ? 'spotify'
+      : setup === 'solo'
+        ? content === 'packs'
+          ? 'deezer'
+          : soloSource
+        : setup === 'spotify'
+          ? 'spotify'
+          : 'deezer'
+  const plannedAudio: AudioSource =
+    content === 'packs' || content === 'whois' || chosenMode === 'deezer' ? 'deezer' : 'spotify'
   const mode = room?.mode ?? chosenMode
   const audio = room?.audio ?? plannedAudio
   const isSolo = room?.solo ?? setup === 'solo'
@@ -239,6 +251,9 @@ function Host({
   roomRef.current = room
   const audioRef = useRef(audio)
   audioRef.current = audio
+  const isWhois = room?.kind === 'whois'
+  const whoisRef = useRef(isWhois)
+  whoisRef.current = isWhois
 
   const save = (key: string, value: string) => localStorage.setItem(key, value)
   const chooseSetup = (value: Setup) => {
@@ -326,7 +341,8 @@ function Host({
   /** Un seul écran : joue l'extrait du palier pour tout le monde (Spotify ou Deezer). */
   const playSnippet = useCallback(
     async (track: Track, stage: number) => {
-      const durationMs = SNIPPET_DURATIONS_MS[stage]
+      // « Qui a mis ce son ? » : tout l'extrait (30 s), pas de paliers.
+      const durationMs = whoisRef.current ? WHO_LISTEN_MS : SNIPPET_DURATIONS_MS[stage]
       const onStart = () => {
         setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
         socket.emit('host:snippet', { stage, durationMs })
@@ -382,7 +398,8 @@ function Host({
   const roomCode = room?.code
   useEffect(() => {
     if (!roomCode) return
-    if (phase === 'reveal') {
+    // « Qui a mis ce son ? » : le morceau continue, on ne le relance pas.
+    if (phase === 'reveal' && !isWhois) {
       if (audio === 'deezer') preview.playFull(previewUrl()).catch(() => {})
       else if (player && current) player.playFull(current.track.uri).catch(() => {})
     }
@@ -390,7 +407,7 @@ function Host({
       preview.stop()
       player?.stop().catch(() => {})
     }
-  }, [phase, roomCode, roundNumber, audio, player, current, preview])
+  }, [phase, roomCode, roundNumber, audio, player, current, preview, isWhois])
 
   const [confirmQuit, setConfirmQuit] = useState(false)
 
@@ -408,7 +425,7 @@ function Host({
     preview.stop()
   }
 
-  const createRoom = (source: { tracks?: Track[]; packs?: string[] }, totalRounds: number) =>
+  const createRoom = (source: { tracks?: Track[]; packs?: string[]; whois?: { perPlayer: number } }, totalRounds: number) =>
     new Promise<void>((resolve, reject) => {
       const tracks = source.tracks ?? []
       setTestUri(tracks.length > 0 ? tracks[Math.floor(Math.random() * tracks.length)].uri : null)
@@ -435,7 +452,12 @@ function Host({
             ? { tone: 'good', text: 'Lecteur Spotify prêt' }
             : { tone: 'neutral', text: 'Démarrage du lecteur…' }
 
-  const musicLabel = room && room.packs.length > 0 ? packNames(room.packs) : 'Playlist Spotify'
+  const musicLabel =
+    room?.kind === 'whois'
+      ? 'Choisies par les joueurs'
+      : room && room.packs.length > 0
+        ? packNames(room.packs)
+        : 'Playlist Spotify'
 
   return (
     <div className="app">
@@ -499,6 +521,8 @@ function Host({
               setShowHome(false)
             }}
           />
+        ) : (!session || !room) && content === 'whois' ? (
+          <WhoSetup onBack={() => setShowHome(true)} onCreate={(perPlayer) => createRoom({ whois: { perPlayer } }, 0)} />
         ) : !session || !room ? (
           <SetupScreen
             setup={setup}
@@ -554,7 +578,7 @@ function Host({
                 />
               ) : null
             }
-            canStart={audio === 'deezer' || player !== null}
+            canStart={room.kind === 'whois' ? !!room.whois?.ready : audio === 'deezer' || player !== null}
             onStart={async () => {
               if (audio === 'spotify') await player?.activate()
               socket.emit('host:start')
@@ -642,7 +666,18 @@ function Host({
               </>
             )}
 
-            {room.phase === 'playing' && !room.solo && room.mode === 'spotify' && (
+            {room.phase === 'playing' && isWhois && (
+              <WhoRound
+                room={room}
+                progress={progress}
+                playing={playing}
+                onReplay={() => current && playSnippet(current.track, 0)}
+              />
+            )}
+
+            {room.phase === 'reveal' && isWhois && <WhoReveal room={room} />}
+
+            {room.phase === 'playing' && !room.solo && !isWhois && room.mode === 'spotify' && (
               <>
                 <div className="card">
                   <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
@@ -688,7 +723,7 @@ function Host({
               </>
             )}
 
-            {room.phase === 'reveal' && room.revealed && (
+            {room.phase === 'reveal' && !isWhois && room.revealed && (
               <div className="reveal-layout">
                 <TrackReveal track={room.revealed} category={room.category} />
                 <div className="stack">
@@ -711,7 +746,7 @@ function Host({
 type Setup = 'deezer' | 'spotify' | 'solo'
 
 /** Avec quelles musiques : des packs thématiques, ou une playlist Spotify. */
-type Content = 'packs' | 'playlist'
+type Content = 'packs' | 'playlist' | 'whois'
 
 const SETUPS: { id: Setup; icon: IconName; title: string; text: string }[] = [
   {
@@ -741,7 +776,7 @@ const SOURCES: { id: GameMode; title: string; text: string }[] = [
 
 const ROUND_CHOICES = [5, 10, 15, 20, 30]
 
-/** Accueil : deux jeux bien distincts, le blind test musical (playlists) et le blind test thèmes. */
+/** Accueil : trois jeux bien distincts (thèmes, playlists, « Qui a mis ce son ? »). */
 function HomeScreen({ onChoose }: { onChoose: (content: Content) => void }) {
   const art = usePackArt()
   const themeImages = PACKS.flatMap((pack) => art[pack.id]?.slice(0, 2) ?? []).slice(0, 6)
@@ -790,6 +825,23 @@ function HomeScreen({ onChoose }: { onChoose: (content: Content) => void }) {
         </span>
         <span className="game-visual vinyl" aria-hidden="true">
           <span className="vinyl-disc" />
+        </span>
+      </button>
+
+      <button className="game-card game-whois" onClick={() => onChoose('whois')}>
+        <span className="game-text">
+          <span className="game-kicker">Entre amis</span>
+          <span className="game-title">Qui a mis ce son ?</span>
+          <span className="game-desc">
+            Chacun glisse 2 ou 3 morceaux en secret depuis son téléphone. On les écoute ensemble : à vous de deviner qui
+            les a choisis. Sans compte à connecter.
+          </span>
+        </span>
+        <span className="game-visual who-visual" aria-hidden="true">
+          {['pk-25', '69-batman', 'pk-6'].map((id) => (
+            <Avatar key={id} id={id} size={76} />
+          ))}
+          <span className="who-visual-q">?</span>
         </span>
       </button>
     </div>
@@ -1128,6 +1180,7 @@ function Lobby({
   onCancel: () => void
 }) {
   const joinUrl = useJoinUrl(room.code)
+  const whois = room.kind === 'whois' ? room.whois : undefined
   const canvas = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     if (joinUrl && canvas.current) {
@@ -1158,21 +1211,31 @@ function Lobby({
             {room.players.length === 0 ? 'On attend du monde' : `${room.players.length} prêt${room.players.length > 1 ? 's' : ''}`}
           </h2>
         </div>
-        {room.players.length > 0 && <PlayerTiles players={room.players} />}
+        {room.players.length > 0 && <PlayerTiles players={room.players} counts={whois?.counts} perPlayer={whois?.perPlayer} />}
         <dl className="facts">
           <div>
-            <dt>Mode</dt>
-            <dd>{room.mode === 'deezer' ? 'Chacun son téléphone' : 'Un seul écran'}</dd>
+            <dt>{whois ? 'Jeu' : 'Mode'}</dt>
+            <dd>{whois ? 'Qui a mis ce son ?' : room.mode === 'deezer' ? 'Chacun son téléphone' : 'Un seul écran'}</dd>
           </div>
           <div>
             <dt>Musiques</dt>
             <dd>{musicLabel}</dd>
           </div>
           <div>
-            <dt>Manches</dt>
-            <dd>{room.totalRounds}</dd>
+            <dt>{whois ? 'Par joueur' : 'Manches'}</dt>
+            <dd>{whois ? `${whois.perPlayer} morceaux` : room.totalRounds}</dd>
           </div>
         </dl>
+        {whois && (
+          <p className="tip">
+            <Icon name="phone" size={18} />
+            {whois.ready
+              ? 'Tout le monde a choisi : vous pouvez lancer !'
+              : room.players.length < 2
+                ? 'Il faut au moins 2 joueurs. Chacun choisit ses morceaux en secret sur son téléphone.'
+                : 'Chacun choisit ses morceaux en secret sur son téléphone…'}
+          </p>
+        )}
         {room.mode === 'deezer' && (
           <p className="tip">
             <Icon name="headphones" size={18} />
@@ -1193,6 +1256,9 @@ function Lobby({
     </div>
   )
 }
+
+/** « Qui a mis ce son ? » : on écoute tout l'extrait Deezer. */
+const WHO_LISTEN_MS = 30000
 
 const SOLO_ID_KEY = 'soloPlayerId'
 

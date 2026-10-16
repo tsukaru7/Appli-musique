@@ -315,15 +315,35 @@ export function ArtMosaic({ images, icon }: { images: string[]; icon: IconName }
 /* ---------- Joueurs et scores ---------- */
 
 /** Les joueurs de la salle d'attente : avatar et pseudo. */
-export function PlayerTiles({ players, meId }: { players: PlayerView[]; meId?: string }) {
+export function PlayerTiles({
+  players,
+  meId,
+  counts,
+  perPlayer,
+}: {
+  players: PlayerView[]
+  meId?: string
+  /** « Qui a mis ce son ? » : nombre de morceaux choisis par chacun. */
+  counts?: Record<string, number>
+  perPlayer?: number
+}) {
   return (
     <ul className="player-tiles">
-      {players.map((p) => (
-        <li key={p.id} className={`${p.id === meId ? 'is-me' : ''} ${p.connected ? '' : 'is-offline'}`}>
-          <Avatar id={p.avatar} size={64} />
-          <span>{p.name}</span>
-        </li>
-      ))}
+      {players.map((p) => {
+        const count = counts?.[p.id] ?? 0
+        return (
+          <li key={p.id} className={`${p.id === meId ? 'is-me' : ''} ${p.connected ? '' : 'is-offline'}`}>
+            <Avatar id={p.avatar} size={64} />
+            <span>{p.name}</span>
+            {counts && perPlayer !== undefined && (
+              <span className={`tile-count ${count >= perPlayer ? 'is-done' : ''}`}>
+                {count >= perPlayer ? <Icon name="check" size={12} /> : null}
+                {count}/{perPlayer}
+              </span>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -385,9 +405,9 @@ export function Scoreboard({ room, highlightId }: { room: RoomView; highlightId?
             <span className="score-rank">{i + 1}</span>
             <Avatar id={p.avatar} size={34} />
             <span className="score-name">{p.name}</span>
-            {room.phase === 'reveal' && r?.foundAtStage !== undefined && (
+            {room.phase === 'reveal' && r && (r.foundAtStage !== undefined || r.points > 0) && (
               <span className="score-gain">
-                +{r.points} <small>· {seconds(r.foundAtStage)}</small>
+                +{r.points} {r.foundAtStage !== undefined && room.kind !== 'whois' && <small>· {seconds(r.foundAtStage)}</small>}
               </span>
             )}
             <span className="score-total">{p.score}</span>

@@ -156,6 +156,12 @@ export async function findDeezerTrack(track: Track): Promise<DeezerMatch | null>
   return null
 }
 
+/** Un morceau Deezer par son identifiant (null s'il n'existe pas ou n'a pas d'extrait). */
+export async function getDeezerTrack(id: number): Promise<DeezerMatch | null> {
+  const found = await deezerGet<DeezerTrack>(`/track/${id}`)
+  return found.id && found.preview ? toMatch(found, 'manual') : null
+}
+
 /** Recherche libre (page de vérification des packs). */
 export async function searchTracks(query: string): Promise<DeezerMatch[]> {
   return (await search(query, 15)).map((t) => toMatch(t, 'manual'))

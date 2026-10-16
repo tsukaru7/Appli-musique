@@ -66,8 +66,39 @@ export interface PlayerRoundView {
 }
 
 /** État de la partie envoyé à tout le monde (sans jamais révéler le morceau avant la fin de la manche). */
+/** Résultat de recherche quand un joueur choisit ses morceaux. */
+export interface WhoSearchResult {
+  deezerId: number
+  title: string
+  artist: string
+  album: string
+  cover?: string
+  /** Extrait à écouter pour vérifier que c'est le bon morceau. */
+  preview?: string
+}
+
+/** Quel jeu : blind test (deviner le titre ou l'œuvre) ou « Qui a mis ce son ? ». */
+export type GameKind = 'blindtest' | 'whois'
+
+/** État propre à « Qui a mis ce son ? ». */
+export interface WhoView {
+  /** Nombre de morceaux que chaque joueur doit ajouter. */
+  perPlayer: number
+  /** Combien de morceaux chaque joueur a déjà ajoutés (pas lesquels : c'est secret). */
+  counts: Record<string, number>
+  /** Tout le monde a choisi ses morceaux : l'hôte peut lancer. */
+  ready: boolean
+  /** Joueurs qui ont déjà voté pendant la manche. */
+  voted: string[]
+  /** À la révélation : qui a mis le morceau, et qui a voté pour qui. */
+  ownerId?: string
+  votes?: Record<string, string>
+}
+
 export interface RoomView {
   code: string
+  kind?: GameKind
+  whois?: WhoView
   mode: GameMode
   /** Partie solo : l'hôte joue seul sur son écran, personne ne rejoint. */
   solo: boolean
@@ -92,6 +123,8 @@ export interface ClientToServerEvents {
       /** Soit une playlist (ses morceaux), soit des packs thématiques. */
       tracks?: Track[]
       packs?: string[]
+      /** « Qui a mis ce son ? » : pas de morceaux au départ, chaque joueur en ajoute `perPlayer`. */
+      whois?: { perPlayer: number }
       totalRounds: number
       mode: GameMode
       solo?: boolean
@@ -113,6 +146,11 @@ export interface ClientToServerEvents {
   ) => void
   'player:guess': (payload: { optionId?: string; text?: string }) => void
   'player:pass': () => void
+  /** « Qui a mis ce son ? » : chercher, ajouter, retirer un morceau, et voter. */
+  'whois:search': (payload: { query: string }, ack: (results: WhoSearchResult[]) => void) => void
+  'whois:add': (payload: { deezerId: number }, ack: (res: { ok: boolean; error?: string }) => void) => void
+  'whois:remove': (payload: { trackId: string }) => void
+  'player:vote': (payload: { targetId: string }) => void
 }
 
 export interface ServerToClientEvents {
@@ -125,4 +163,8 @@ export interface ServerToClientEvents {
   'player:feedback': (payload: { correct: boolean; guessLabel: string; points: number }) => void
   /** La partie a été fermée par l'hôte. */
   'room:closed': () => void
+  /** « Qui a mis ce son ? » : les morceaux choisis par ce joueur (lui seul les reçoit). */
+  'whois:mine': (payload: { tracks: Track[] }) => void
+  /** « Qui a mis ce son ? » : le morceau de cette manche est le tien. */
+  'whois:yours': (payload: { roundNumber: number }) => void
 }

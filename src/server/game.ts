@@ -200,6 +200,7 @@ export class Game {
     })
     return {
       code: this.code,
+      kind: 'blindtest',
       mode: this.mode,
       solo: this.solo,
       audio: this.audio,

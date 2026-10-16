@@ -2289,3 +2289,334 @@ a {
   justify-content: space-between;
   gap: 10px;
 }
+
+/* ---------- « Qui a mis ce son ? » ---------- */
+
+.result.is-bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-weight: 500;
+}
+
+.rules {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.rules strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Carte de l'accueil : trois avatars et un point d'interrogation */
+.who-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 60% 50%, rgba(255, 106, 61, 0.16), transparent 62%), var(--surface-2);
+}
+
+.who-visual .avatar {
+  margin-left: -16px;
+  box-shadow: 0 0 0 4px var(--surface-2);
+}
+
+.who-visual .avatar:nth-child(2) {
+  transform: translateY(-14px) scale(1.12);
+  z-index: 1;
+}
+
+.who-visual-q {
+  position: absolute;
+  right: 18%;
+  top: 14%;
+  font-family: var(--font-display);
+  font-size: 4.4rem;
+  line-height: 1;
+  color: var(--accent);
+  transform: rotate(10deg);
+}
+
+/* Compteur de morceaux sous les avatars de la salle d'attente */
+.player-tiles li .tile-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.player-tiles li .tile-count.is-done {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+/* Écran de l'hôte pendant l'écoute */
+.who-round {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  text-align: center;
+}
+
+.who-question {
+  font-size: clamp(2.6rem, 6vw, 4.2rem);
+  margin: 0;
+}
+
+.who-players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px 22px;
+}
+
+.who-players li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.who-players li.is-offline {
+  opacity: 0.4;
+}
+
+.who-owner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+}
+
+.who-owner div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.who-owner strong {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.05;
+}
+
+.who-votes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.who-votes li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.who-votes li.is-good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.who-votes li.is-bad {
+  color: var(--muted);
+}
+
+.who-vote-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.who-vote-arrow {
+  font-size: 0.85rem;
+}
+
+.who-votes li > :last-child {
+  margin-left: auto;
+}
+
+/* Téléphone : choix des morceaux */
+.who-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.who-progress i {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.who-progress i.on {
+  background: var(--accent);
+}
+
+.who-progress span {
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.who-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.who-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.who-cover {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface-3);
+}
+
+.who-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.who-cover.is-button {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  color: #fff;
+}
+
+.who-cover-icon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.who-cover.is-playing .who-cover-icon {
+  background: rgba(255, 106, 61, 0.6);
+}
+
+.who-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.who-text strong,
+.who-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who-list .btn {
+  flex: none;
+}
+
+/* Téléphone : vote */
+.who-choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.who-choices button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.12s var(--ease),
+    border-color 0.15s var(--ease);
+}
+
+.who-choices button:active {
+  transform: scale(0.97);
+  border-color: var(--accent);
+}
+
+.who-choices button.is-offline {
+  opacity: 0.5;
+}
+
+.who-choices button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who-mine,
+.who-voted {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.who-mine h1,
+.who-voted h1 {
+  margin: 0;
+}
+
+.who-mine-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}

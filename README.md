@@ -76,6 +76,21 @@ Projet **privé entre amis**, pas destiné à être publié.
   version reconnaissable est cherchée). Ça marche dans les trois façons de jouer.
 - Les listes sont dans `src/shared/packs/` : une ligne par morceau, faciles à corriger ou compléter.
 
+### 🕵️ Qui a mis ce son ?
+
+Un troisième jeu, entre amis (au moins 2 joueurs), sans compte à connecter :
+
+1. L'hôte choisit le nombre de morceaux par joueur (2 ou 3) et crée la partie.
+2. Chacun rejoint avec son téléphone et **choisit ses morceaux en secret** (recherche Deezer, on
+   peut écouter avant d'ajouter). Un même morceau ne peut pas être mis deux fois.
+3. Quand tout le monde a choisi, l'hôte lance : les morceaux sont mélangés et joués **sur l'écran
+   de l'hôte** (extraits Deezer de 30 s).
+4. Sur son téléphone, chacun vote pour la personne qui l'a mis. Celui dont c'est le morceau le voit
+   (« C'est ton morceau ! ») et ne vote pas.
+
+Points : **500** pour un bon vote, jusqu'à **1000** si on répond vite (bonus qui baisse sur 20 s),
+et **200** pour celui qui a mis le morceau, pour chaque joueur qui s'est trompé.
+
 ### Vérifier les musiques (`/verifier`)
 
 Page réservée à l'hôte (lien en bas des réglages du blind test thèmes) :
