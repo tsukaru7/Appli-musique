@@ -50,14 +50,14 @@ Projet **privé entre amis**, pas destiné à être publié.
 ## 4. Feuille de route
 
 ### Version 1 — Mode soirée
-- [ ] Connexion Spotify de l'hôte (OAuth PKCE)
-- [ ] Choix d'une playlist : les siennes, ou un lien de playlist publique
-- [ ] Lecteur intégré sur l'ordinateur, extraits de durée croissante
-- [ ] Création d'une partie avec code + QR code
-- [ ] Les joueurs rejoignent depuis leur téléphone avec un pseudo
-- [ ] Réponse avec autocomplétion, bouton « passer »
-- [ ] Calcul des points, révélation du morceau (titre, artiste, pochette) entre les manches
-- [ ] Classement final
+- [x] Connexion Spotify de l'hôte (OAuth PKCE)
+- [x] Choix d'une playlist : les siennes, ou un lien de playlist publique
+- [x] Lecteur intégré sur l'ordinateur, extraits de durée croissante
+- [x] Création d'une partie avec code + QR code
+- [x] Les joueurs rejoignent depuis leur téléphone avec un pseudo
+- [x] Réponse avec autocomplétion, bouton « passer »
+- [x] Calcul des points, révélation du morceau (titre, artiste, pochette) entre les manches
+- [x] Classement final
 - [ ] Prototype de validation : précision du lecteur sur des extraits de 1 s
 
 ### Version 2 — Plus de façons de jouer
@@ -70,7 +70,37 @@ Projet **privé entre amis**, pas destiné à être publié.
 - [ ] Historique des parties et statistiques par joueur
 - [ ] Mode solo sur téléphone « à l'honnêteté » (le titre s'affiche dans la notification Spotify)
 
-## 5. Choix techniques (proposition)
+## 5. Lancer le jeu sur son ordinateur
+
+Prérequis : [Node.js](https://nodejs.org) 20 ou plus récent.
+
+```bash
+npm install     # une seule fois
+npm run dev     # démarre le jeu
+```
+
+1. Sur l'ordinateur, ouvre **http://127.0.0.1:5173** (pas « localhost », Spotify le refuse) et
+   connecte-toi avec Spotify.
+2. Choisis une playlist : l'écran affiche un **code** et un **QR code**.
+3. Les joueurs scannent le QR code avec leur téléphone. Ils doivent être sur le **même Wi-Fi**
+   que l'ordinateur. Sous Windows, accepte la demande du pare-feu au premier lancement, sinon
+   les téléphones ne pourront pas se connecter.
+4. Lance la partie : l'ordinateur joue les extraits, les téléphones répondent.
+
+Autres commandes : `npm test` (tests de la logique du jeu), `npm run build` puis `npm start`
+(version de production, servie sur le port 3001).
+
+### Organisation du code
+
+| Dossier | Contenu |
+|---|---|
+| `src/shared/` | Types échangés entre serveur et pages, vérification des réponses |
+| `src/server/` | Serveur de jeu temps réel (parties, manches, paliers, points) |
+| `src/client/host/` | Page hôte (ordinateur) : connexion Spotify, choix de playlist, lecteur, scores |
+| `src/client/player/` | Page joueur (téléphone) : rejoindre, répondre, scores |
+| `src/client/spotify/` | Connexion, appels à l'API et lecteur d'extraits Spotify |
+
+## 6. Choix techniques (proposition)
 
 - **Application web** en TypeScript (React + Vite) : une page « hôte » pour l'ordinateur et une
   page « joueur » pour les téléphones.
@@ -80,7 +110,7 @@ Projet **privé entre amis**, pas destiné à être publié.
 - **Hébergement** : à choisir (ex. Render, Railway, Fly.io), avec une adresse HTTPS
   obligatoire pour la connexion Spotify.
 
-## 6. Prérequis côté Spotify
+## 7. Prérequis côté Spotify
 
 1. Le créateur de l'app doit avoir un compte **Spotify Premium**.
 2. Créer une app sur le [tableau de bord développeur Spotify](https://developer.spotify.com/dashboard)
