@@ -14,23 +14,59 @@ function playerId(): string {
   return id
 }
 
+const SESSION_KEY = 'playerSession'
+
+/** Dernière partie rejointe sur ce téléphone, pour y revenir tout seul après un rechargement. */
+function readSession(): { code: string; name: string } | null {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null')
+  } catch {
+    return null
+  }
+}
+
 export function PlayerApp() {
-  const [code, setCode] = useState(() => new URLSearchParams(window.location.search).get('code') ?? '')
-  const [name, setName] = useState(() => localStorage.getItem('playerName') ?? '')
+  const urlCode = new URLSearchParams(window.location.search).get('code')?.toUpperCase() ?? ''
+  const [saved] = useState(() => {
+    const session = readSession()
+    // Un lien vers une autre partie l'emporte sur la partie enregistrée.
+    return session && (!urlCode || urlCode === session.code) ? session : null
+  })
+  const [code, setCode] = useState(saved?.code ?? urlCode)
+  const [name, setName] = useState(() => saved?.name ?? localStorage.getItem('playerName') ?? '')
   const [joined, setJoined] = useState(false)
+  const [reconnecting, setReconnecting] = useState(saved !== null)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<AnswerOption[]>([])
   const [room, setRoom] = useState<RoomView | null>(null)
   const id = useMemo(playerId, [])
 
-  const join = () => {
-    setError(null)
-    socket.emit('player:join', { code: code.toUpperCase().trim(), name, playerId: id }, (res) => {
-      if (!res.ok) return setError(res.error)
-      localStorage.setItem('playerName', name)
-      setOptions(res.options)
-      setJoined(true)
-    })
+  const join = useCallback(
+    (joinCode: string, joinName: string) => {
+      setError(null)
+      socket.emit('player:join', { code: joinCode.toUpperCase().trim(), name: joinName, playerId: id }, (res) => {
+        setReconnecting(false)
+        if (!res.ok) {
+          localStorage.removeItem(SESSION_KEY)
+          return setError(res.error)
+        }
+        localStorage.setItem('playerName', joinName)
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ code: joinCode.toUpperCase().trim(), name: joinName }))
+        setOptions(res.options)
+        setJoined(true)
+      })
+    },
+    [id],
+  )
+
+  // Page rechargée : on revient directement dans la partie, avec le même score.
+  useEffect(() => {
+    if (saved) join(saved.code, saved.name)
+  }, [saved, join])
+
+  const leave = () => {
+    localStorage.removeItem(SESSION_KEY)
+    window.location.replace('/join')
   }
 
   useEffect(() => {
@@ -50,6 +86,15 @@ export function PlayerApp() {
     }
   }, [joined, code, name, id])
 
+  if (reconnecting || (joined && !room)) {
+    return (
+      <main className="player center">
+        <h1>🎵 Appli-musique</h1>
+        <p className="hint">⏳ Retour dans la partie {code}…</p>
+      </main>
+    )
+  }
+
   if (!joined || !room) {
     return (
       <main className="player center">
@@ -58,7 +103,7 @@ export function PlayerApp() {
           className="join-form"
           onSubmit={(e) => {
             e.preventDefault()
-            join()
+            join(code, name)
           }}
         >
           <input
@@ -84,6 +129,9 @@ export function PlayerApp() {
         <span className="logo">🎵 {room.code}</span>
         <span>{name}</span>
         <span className="score">{room.players.find((p) => p.id === id)?.score ?? 0} pts</span>
+        <button className="link" onClick={leave}>
+          Quitter
+        </button>
       </header>
       {room.phase === 'lobby' && (
         <section className="panel center">
@@ -124,19 +172,41 @@ function MyResult({ room, playerId }: { room: RoomView; playerId: string }) {
   return <p className="hint">Raté pour cette fois…</p>
 }
 
-/** Mauvaises réponses de la manche en cours (remises à zéro à chaque manche). */
-function useWrongGuesses(roundNumber: number): string[] {
-  const [wrongGuesses, setWrongGuesses] = useState<string[]>([])
-  useEffect(() => setWrongGuesses([]), [roundNumber])
+/** Mauvaises réponses de la manche en cours (gardées si la page est rechargée). */
+function useWrongGuesses(code: string, roundNumber: number): string[] {
+  const key = `wrongGuesses:${code}:${roundNumber}`
+  const [wrongGuesses, setWrongGuesses] = useState<string[]>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(key) ?? '[]')
+    } catch {
+      return []
+    }
+  })
+  useEffect(() => {
+    try {
+      setWrongGuesses(JSON.parse(sessionStorage.getItem(key) ?? '[]'))
+    } catch {
+      setWrongGuesses([])
+    }
+  }, [key])
   useEffect(() => {
     const onFeedback = ({ correct, guessLabel }: { correct: boolean; guessLabel: string }) => {
-      if (!correct) setWrongGuesses((g) => [...g, guessLabel])
+      if (correct) return
+      setWrongGuesses((g) => {
+        const next = [...g, guessLabel]
+        try {
+          sessionStorage.setItem(key, JSON.stringify(next))
+        } catch {
+          // stockage indisponible (navigation privée) : tant pis, la liste reste en mémoire
+        }
+        return next
+      })
     }
     socket.on('player:feedback', onFeedback)
     return () => {
       socket.off('player:feedback', onFeedback)
     }
-  }, [])
+  }, [key])
   return wrongGuesses
 }
 
@@ -188,7 +258,7 @@ function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNu
 /** Mode Spotify : l'extrait sort de l'ordinateur de l'hôte, tout le monde avance ensemble. */
 function Round({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
-  const wrongGuesses = useWrongGuesses(room.roundNumber)
+  const wrongGuesses = useWrongGuesses(room.code, room.roundNumber)
   const mine = room.roundResults.find((r) => r.playerId === playerId)
 
   useEffect(() => {
@@ -233,7 +303,7 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
   const frame = useRef(0)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const wrongGuesses = useWrongGuesses(room.roundNumber)
+  const wrongGuesses = useWrongGuesses(room.code, room.roundNumber)
   const mine = room.roundResults.find((r) => r.playerId === playerId)
   const stage = mine?.stage ?? 0
   const done = mine?.status === 'correct' || mine?.status === 'out'

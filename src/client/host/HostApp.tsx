@@ -16,7 +16,7 @@ interface HostSession {
 
 function readSession(): HostSession | null {
   try {
-    return JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null')
+    return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null')
   } catch {
     return null
   }
@@ -114,7 +114,7 @@ function Host({ onLogout }: { onLogout: () => void }) {
       if (!s) return
       socket.emit('host:resume', s, (res) => {
         if (!res.ok) {
-          sessionStorage.removeItem(SESSION_KEY)
+          localStorage.removeItem(SESSION_KEY)
           setSession(null)
           setRoom(null)
         }
@@ -189,7 +189,7 @@ function Host({ onLogout }: { onLogout: () => void }) {
   }, [mode, phase, roomCode, roundNumber])
 
   const newGame = () => {
-    sessionStorage.removeItem(SESSION_KEY)
+    localStorage.removeItem(SESSION_KEY)
     setSession(null)
     setRoom(null)
     setCurrent(null)
@@ -202,7 +202,7 @@ function Host({ onLogout }: { onLogout: () => void }) {
       socket.emit('host:create', { tracks, totalRounds, mode: chosenMode }, (res) => {
         if (!res.ok) return reject(new Error(res.error))
         const s = { code: res.code, hostKey: res.hostKey }
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
+        localStorage.setItem(SESSION_KEY, JSON.stringify(s))
         setSession(s)
         resolve()
       })
