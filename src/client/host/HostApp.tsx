@@ -158,8 +158,14 @@ function Host({ onLogout }: { onLogout: () => void }) {
     return () => clearTimeout(timer)
   }, [current, player, playSnippet])
 
-  // Révélation : on laisse tourner le morceau ; fin de partie : on coupe.
+  // Nouvelle manche : on coupe tout de suite le morceau de la révélation précédente.
   const phase = room?.phase
+  const round = room?.roundNumber
+  useEffect(() => {
+    if (player && phase === 'playing') player.stop().catch(() => {})
+  }, [player, phase, round])
+
+  // Révélation : on laisse tourner le morceau ; fin de partie : on coupe.
   useEffect(() => {
     if (!player || !current) return
     if (phase === 'reveal') player.playFull(current.track.uri).catch(() => {})

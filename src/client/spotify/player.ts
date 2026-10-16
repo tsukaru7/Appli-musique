@@ -52,6 +52,8 @@ function loadSdk(): Promise<void> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+const VOLUME = 0.8
+
 const ERRORS: Record<string, string> = {
   initialization_error: "Ce navigateur ne peut pas lire Spotify. Utilise Chrome, Edge ou Firefox sur un ordinateur.",
   authentication_error: 'Connexion Spotify expirée : reconnecte-toi.',
@@ -66,6 +68,8 @@ const ERRORS: Record<string, string> = {
  */
 export class SnippetPlayer {
   private playId = 0
+  /** Morceau chargé dans le lecteur (en pause au début, prêt à être joué). */
+  private loadedUri: string | null = null
 
   private constructor(
     private readonly player: SdkPlayer,
@@ -84,7 +88,7 @@ export class SnippetPlayer {
       getOAuthToken: (cb) => {
         getAccessToken().then(cb, (err) => onError(String(err.message ?? err)))
       },
-      volume: 0.8,
+      volume: VOLUME,
     })
     const deviceId = await new Promise<string>((resolve, reject) => {
       player.addListener('ready', ({ device_id }) => resolve(device_id))
@@ -130,15 +134,44 @@ export class SnippetPlayer {
     await spotifyFetch(`/me/player/pause?device_id=${this.deviceId}`, { method: 'PUT' }).catch(() => {})
   }
 
-  /** Lance le morceau depuis le début et attend qu'il joue vraiment. */
-  private async startFromBeginning(uri: string): Promise<PlaybackState> {
-    await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ uris: [uri], position_ms: 0 }),
-    })
-    const state = await this.waitFor((s) => this.isPlaying(s, uri), 6000)
-    if (!state) throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
-    return state
+  /**
+   * Charge un nouveau morceau **en silence** et le laisse en pause au tout début.
+   *
+   * Quand on change de morceau, le lecteur Spotify rejoue souvent un bref bout de l'ancien :
+   * le son est coupé pendant le changement pour qu'on ne l'entende pas.
+   */
+  private async prepare(uri: string): Promise<void> {
+    this.loadedUri = null
+    await this.player.setVolume(0).catch(() => {})
+    try {
+      await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ uris: [uri], position_ms: 0 }),
+      })
+      if (!(await this.waitFor((s) => this.isPlaying(s, uri), 6000))) {
+        throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
+      }
+      await this.forcePause()
+      await this.player.seek(0)
+      this.loadedUri = uri
+    } finally {
+      await this.player.setVolume(VOLUME).catch(() => {})
+    }
+  }
+
+  /** Repart du début du morceau (déjà chargé, donc sans passer par Spotify) et attend que ça joue. */
+  private async resumeFromBeginning(uri: string): Promise<PlaybackState> {
+    const state = await this.player.getCurrentState()
+    const loaded = state?.track_window.current_track
+    if (this.loadedUri !== uri || !loaded || (loaded.uri !== uri && loaded.linked_from?.uri !== uri)) {
+      await this.prepare(uri)
+    } else {
+      await this.player.seek(0)
+    }
+    await this.player.resume()
+    const playing = await this.waitFor((s) => this.isPlaying(s, uri), 6000)
+    if (!playing) throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
+    return playing
   }
 
   /**
@@ -150,10 +183,10 @@ export class SnippetPlayer {
     // Filet de sécurité : même si quelque chose bloque, le son est coupé.
     const safety = setTimeout(() => {
       if (id === this.playId) this.forcePause()
-    }, durationMs + 8000)
+    }, durationMs + 12000)
     try {
       await this.player.pause().catch(() => {})
-      const state = await this.startFromBeginning(uri)
+      const state = await this.resumeFromBeginning(uri)
       if (id !== this.playId) return
       onStart?.()
       // Temps déjà joué au moment où on a lu l'état du lecteur.
@@ -172,7 +205,7 @@ export class SnippetPlayer {
   /** Révélation : on laisse le morceau tourner depuis le début. */
   async playFull(uri: string): Promise<void> {
     this.playId++
-    await this.startFromBeginning(uri)
+    await this.resumeFromBeginning(uri)
   }
 
   async stop(): Promise<void> {
