@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
-import {
-  POINTS_BY_STAGE,
-  SNIPPET_DURATIONS_MS,
-  type AnswerBy,
-  type AnswerOption,
-  type RoomView,
-} from '../../shared/protocol.ts'
+import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
 import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
 import { detectSoundStart } from '../audio.ts'
 import { socket, useSocket } from '../socket.ts'
@@ -283,15 +277,7 @@ export function WrongGuesses({ guesses }: { guesses: string[] }) {
 }
 
 /** Champ de réponse avec autocomplétion sur les morceaux de la playlist. */
-export function GuessInput({
-  options,
-  roundNumber,
-  answerBy = 'title',
-}: {
-  options: AnswerOption[]
-  roundNumber: number
-  answerBy?: AnswerBy
-}) {
+export function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNumber: number }) {
   const socket = useSocket()
   const [query, setQuery] = useState('')
   const suggestions = useMemo(() => filterOptions(options, query), [options, query])
@@ -313,7 +299,7 @@ export function GuessInput({
       >
         <input
           className="guess-input"
-          placeholder={answerBy === 'work' ? 'Film, jeu, série, dessin animé…' : 'Titre ou artiste…'}
+          placeholder="Titre ou artiste…"
           value={query}
           autoComplete="off"
           spellCheck={false}
@@ -370,7 +356,7 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
         <p className="result">{mine.status === 'wrong' ? 'Raté.' : 'Passé.'} Attends l'extrait suivant…</p>
       ) : (
         <>
-          <GuessInput options={options} roundNumber={room.roundNumber} answerBy={room.answerBy} />
+          <GuessInput options={options} roundNumber={room.roundNumber} />
           <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             Je ne sais pas
@@ -501,7 +487,7 @@ export function DeezerRound({ room, playerId, options }: { room: RoomView; playe
           />
           <StageBar stage={stage} progressKey={progress?.key} progressMs={progress?.ms} />
           {error && <p className="notice is-bad">{error}</p>}
-          <GuessInput options={options} roundNumber={room.roundNumber} answerBy={room.answerBy} />
+          <GuessInput options={options} roundNumber={room.roundNumber} />
           <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
             <Icon name="skip" size={18} />
             {stage < lastStage ? `Passer · écouter ${seconds(stage + 1)}` : 'Abandonner la manche'}

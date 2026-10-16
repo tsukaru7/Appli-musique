@@ -4,15 +4,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { Server, type Socket } from 'socket.io'
-import { buildAnswerOptions, cleanWorkName } from '../shared/answers.ts'
-import type {
-  AnswerBy,
-  AnswerOption,
-  ClientToServerEvents,
-  GameMode,
-  ServerToClientEvents,
-  Track,
-} from '../shared/protocol.ts'
+import { buildAnswerOptions } from '../shared/answers.ts'
+import type { AnswerOption, ClientToServerEvents, GameMode, ServerToClientEvents, Track } from '../shared/protocol.ts'
 import { fetchPreview, findPlayableTracks } from './deezer.ts'
 import { Game, type Change } from './game.ts'
 
@@ -208,7 +201,6 @@ function sanitizeTracks(tracks: unknown): Track[] {
       artists: Array.isArray(t.artists) ? t.artists.map(String).slice(0, 10) : [],
       albumImage: typeof t.albumImage === 'string' ? t.albumImage : undefined,
       isrc: typeof t.isrc === 'string' ? t.isrc.slice(0, 20) : undefined,
-      album: typeof t.album === 'string' ? t.album.slice(0, 300) : undefined,
     }))
     .slice(0, 5000)
 }
@@ -216,18 +208,13 @@ function sanitizeTracks(tracks: unknown): Track[] {
 io.on('connection', (socket: GameSocket) => {
   const ip = String(socket.handshake.headers['x-forwarded-for'] ?? socket.handshake.address).split(',')[0].trim()
 
-  socket.on('host:create', async ({ tracks, totalRounds, mode, solo, answerBy, password }, ack) => {
+  socket.on('host:create', async ({ tracks, totalRounds, mode, solo, password }, ack) => {
     if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     if (!checkPassword(password)) {
       recordFailure(ip)
       return ack({ ok: false, error: 'Mot de passe hôte incorrect.' })
     }
-    const answer: AnswerBy = answerBy === 'work' ? 'work' : 'title'
-    let clean = sanitizeTracks(tracks)
-    // Deviner l'œuvre : la réponse est le nom de l'album, débarrassé des « (Original Soundtrack) »…
-    if (answer === 'work') {
-      clean = clean.filter((t) => t.album).map((t) => ({ ...t, work: cleanWorkName(t.album!) }))
-    }
+    const clean = sanitizeTracks(tracks)
     if (clean.length === 0) return ack({ ok: false, error: 'La playlist ne contient aucun morceau jouable.' })
     const gameMode: GameMode = mode === 'deezer' ? 'deezer' : 'spotify'
     const rounds = Number(totalRounds) || 10
@@ -245,7 +232,7 @@ io.on('connection', (socket: GameSocket) => {
 
     const code = newCode()
     const room: Room = {
-      game: new Game(code, playable, rounds, { mode: gameMode, solo: solo === true, answerBy: answer, answerTracks: clean }),
+      game: new Game(code, playable, rounds, { mode: gameMode, solo: solo === true, answerTracks: clean }),
       hostKey: randomBytes(16).toString('hex'),
       hostSocketId: socket.id,
       options: buildAnswerOptions(clean),

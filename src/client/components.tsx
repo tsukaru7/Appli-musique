@@ -289,10 +289,8 @@ export function TrackReveal({ track, compact = false }: { track: Track; compact?
       <div className="reveal-cover">{track.albumImage && <Cover src={track.albumImage} />}</div>
       <div className="reveal-text">
         <span className="eyebrow">C'était</span>
-        <span className="reveal-title">{track.work ?? track.title}</span>
-        <span className="reveal-artists">
-          {track.work ? `${track.title} — ${track.artists.join(', ')}` : track.artists.join(', ')}
-        </span>
+        <span className="reveal-title">{track.title}</span>
+        <span className="reveal-artists">{track.artists.join(', ')}</span>
       </div>
     </div>
   )
