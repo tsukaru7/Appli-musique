@@ -1,0 +1,9 @@
+# Déploiement en un clic sur Render (https://render.com) : Dashboard → New → Blueprint → ce dépôt.
+services:
+  - type: web
+    name: appli-musique
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/info

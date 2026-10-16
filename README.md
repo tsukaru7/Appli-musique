@@ -90,6 +90,20 @@ npm run dev     # démarre le jeu
 Autres commandes : `npm test` (tests de la logique du jeu), `npm run build` puis `npm start`
 (version de production, servie sur le port 3001).
 
+### Mettre le jeu en ligne (sans rien installer)
+
+Le jeu peut tourner sur [Render](https://render.com) (offre gratuite) : on obtient une adresse
+du type `https://appli-musique.onrender.com` à ouvrir depuis n'importe quel ordinateur.
+
+1. Créer un compte Render en se connectant avec GitHub.
+2. **New → Blueprint**, choisir le dépôt `Appli-musique` (et la branche voulue) : Render lit
+   `render.yaml` et déploie tout seul.
+3. Dans le tableau de bord Spotify, ajouter la *Redirect URI*
+   `https://<adresse-render>/callback`.
+
+Sur l'offre gratuite, le serveur s'endort après 15 minutes sans visite : la première ouverture
+prend environ une minute.
+
 ### Organisation du code
 
 | Dossier | Contenu |
