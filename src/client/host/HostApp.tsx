@@ -910,6 +910,10 @@ function SetupScreen({
                   : `${packNames(selectedPacks)} · ${packCount} œuvres au choix`}
               </span>
             </div>
+            <a className="verify-link small" href="/verifier">
+              Une musique ne va pas ? Vérifier les musiques des packs
+              <Icon name="arrow" size={14} />
+            </a>
           </section>
         </>
       ) : (

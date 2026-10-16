@@ -76,6 +76,20 @@ Projet **privé entre amis**, pas destiné à être publié.
   version reconnaissable est cherchée). Ça marche dans les trois façons de jouer.
 - Les listes sont dans `src/shared/packs/` : une ligne par morceau, faciles à corriger ou compléter.
 
+### Vérifier les musiques (`/verifier`)
+
+Page réservée à l'hôte (lien en bas des réglages du blind test thèmes) :
+
+- pour chaque œuvre, la musique qui sera jouée (version officielle, reprise ou introuvable), avec
+  un bouton pour l'écouter ;
+- **Changer** : chercher la bonne version sur Deezer et la choisir ;
+- **Retirer / Remettre** une œuvre ;
+- **Ajouter une œuvre** : la page dit si elle est déjà dans un pack (ou s'il y a un nom proche),
+  puis on choisit sa musique sur Deezer.
+
+Les modifications comptent tout de suite dans les parties. Pour les rendre définitives, la page
+génère une liste à reporter dans `src/shared/packs/` (versions choisies dans `overrides.ts`).
+
 Dans les modes à plusieurs, les joueurs rejoignent la partie via un code ou un QR code, dans le
 navigateur, sans rien installer et sans compte. Ils répondent avec une **autocomplétion** sur
 les titres de la playlist.

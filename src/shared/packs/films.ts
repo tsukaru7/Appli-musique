@@ -118,5 +118,4 @@ export const FILMS: PackEntry[] = [
   ['Astérix et Obélix : Mission Cléopâtre', 'Mission Cléopâtre', 'Philippe Chany', ['Mission Cléopâtre']],
   ['La Haine', 'Burnin’ and Lootin’', 'Bob Marley'],
   ['Le Dîner de cons', 'Le Dîner de cons', 'Vladimir Cosma'],
-  ['Les Petits Mouchoirs', 'Pursuit of Happiness', 'Kid Cudi'],
 ]

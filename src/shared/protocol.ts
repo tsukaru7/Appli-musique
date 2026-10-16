@@ -19,6 +19,8 @@ export interface Track {
   aliases?: string[]
   /** Packs : mots ajoutés à la recherche Deezer si le morceau exact n'est pas trouvé. */
   searchHint?: string
+  /** Packs : version Deezer choisie et vérifiée à la main (prioritaire sur la recherche). */
+  deezerId?: number
 }
 
 /** D'où vient le son : le lecteur Spotify de l'ordinateur, ou les extraits Deezer. */

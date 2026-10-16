@@ -99,11 +99,11 @@ export const ANIMES: PackEntry[] = [
   ['Great Teacher Onizuka', "Driver's High", "L'Arc~en~Ciel", ['GTO']],
   ['Kaiju No. 8', 'Abyss', 'YUNGBLUD'],
   ["Hell's Paradise", 'W●RK', 'Millennium Parade'],
-  ['Yu-Gi-Oh!', 'Shuffle', 'Masaaki Endoh', ['Yu Gi Oh']],
-  ['Beyblade', 'Let It Rip', ''],
   ['Toradora!', 'Pre-Parade', 'Rie Kugimiya', ['Toradora']],
   ['Clannad', 'Megumeru', 'Eufonius'],
   ['Hellsing', 'Logos Naki World', 'Yasushi Ishii'],
   ['Wolf Children', 'Okaa-san no Uta', 'Ann Sally', ['Les Enfants loups']],
   ['Lycoris Recoil', 'ALIVE', 'ClariS'],
+  ['Nana', 'Rose', 'Anna Tsuchiya'],
+  ['Death Parade', 'Flyers', 'BRADIO'],
 ]

@@ -13,10 +13,11 @@ import type {
   ServerToClientEvents,
   Track,
 } from '../shared/protocol.ts'
-import { fetchPreview, findPlayableTracks } from './deezer.ts'
+import { fetchPreview, findDeezerTrack, findPlayableTracks, searchTracks, type DeezerMatch } from './deezer.ts'
 import { Game, type Change } from './game.ts'
 import { findPack, packOfTrack } from '../shared/packs/index.ts'
 import { findWorkImage, getPackArt } from './images.ts'
+import { DEEZER_OVERRIDES, overrideKey } from '../shared/packs/overrides.ts'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const PRODUCTION = process.argv.includes('--production') || process.env.NODE_ENV === 'production'
@@ -97,6 +98,136 @@ app.get('/api/info', (_req, res) => {
         .filter((i) => i && i.family === 'IPv4' && !i.internal)
         .map((i) => i!.address)
   res.json({ lanAddresses, hostPasswordRequired: HOST_PASSWORD !== '' })
+})
+
+/**
+ * Vérification des packs (réservée à l'hôte) : quelle musique est jouée pour chaque œuvre, et
+ * possibilité d'en choisir une autre. Les choix valent jusqu'au redémarrage du serveur ; pour les
+ * garder, ils sont copiés dans src/shared/packs/overrides.ts.
+ */
+const manualOverrides = new Map<string, number>()
+/** Œuvres retirées et ajoutées depuis la page de vérification (clé « pack/œuvre »). */
+const removedWorks = new Set<string>()
+const addedWorks = new Map<string, { packId: string; work: string; match: DeezerMatch }>()
+
+interface CheckRow {
+  key: string
+  work: string
+  title: string
+  artist: string
+  match: DeezerMatch | null
+  removed?: boolean
+  added?: boolean
+}
+const checkCache = new Map<string, Promise<CheckRow[]>>()
+
+function requireHost(req: express.Request, res: express.Response): boolean {
+  const ip = req.ip ?? 'inconnu'
+  if (isBlocked(ip)) {
+    res.status(429).json({ error: TOO_MANY })
+    return false
+  }
+  if (!checkPassword(req.get('x-host-password') ?? '')) {
+    recordFailure(ip)
+    res.status(401).json({ error: 'Mot de passe hôte incorrect.' })
+    return false
+  }
+  return true
+}
+
+app.get('/api/check/:packId', async (req, res) => {
+  if (!requireHost(req, res)) return
+  const pack = findPack(req.params.packId)
+  if (!pack) {
+    res.status(404).json({ error: 'Pack inconnu.' })
+    return
+  }
+  let rows = checkCache.get(pack.id)
+  if (!rows || req.query.refresh) {
+    const tracks = tracksFromPacks([pack.id], { withRemoved: true, withAdded: false })
+    rows = (async () => {
+      const results: CheckRow[] = []
+      let next = 0
+      const worker = async () => {
+        while (next < tracks.length) {
+          const track = tracks[next++]
+          const match = await findDeezerTrack(track).catch(() => null)
+          results.push({ key: overrideKey(pack.id, track.work!), work: track.work!, title: track.title, artist: track.artists[0] ?? '', match })
+        }
+      }
+      await Promise.all([worker(), worker(), worker()])
+      return results.sort((a, b) => a.work.localeCompare(b.work, 'fr'))
+    })()
+    checkCache.set(pack.id, rows)
+    rows.catch(() => checkCache.delete(pack.id))
+  }
+  const base = (await rows).map((row) => ({ ...row, removed: removedWorks.has(row.key) }))
+  const added = [...addedWorks.entries()]
+    .filter(([, a]) => a.packId === pack.id)
+    .map(([key, a]) => ({
+      key,
+      work: a.work,
+      title: a.match.title,
+      artist: a.match.artist,
+      match: { ...a.match, kind: 'manual' as const },
+      removed: removedWorks.has(key),
+      added: true,
+    }))
+  res.json([...base, ...added])
+})
+
+/** Retirer, remettre ou ajouter une œuvre dans un pack. */
+app.post('/api/pack-edit', (req, res) => {
+  if (!requireHost(req, res)) return
+  const { action, key, packId, work, match } = req.body ?? {}
+  if ((action === 'remove' || action === 'restore') && typeof key === 'string') {
+    if (action === 'remove') removedWorks.add(key)
+    else removedWorks.delete(key)
+    res.json({ ok: true })
+    return
+  }
+  if (action === 'add' && findPack(packId) && typeof work === 'string' && work.trim() && Number.isInteger(match?.id)) {
+    const name = work.trim().slice(0, 120)
+    addedWorks.set(overrideKey(packId, name), {
+      packId,
+      work: name,
+      match: {
+        id: match.id,
+        kind: 'manual',
+        title: String(match.title ?? '').slice(0, 200),
+        artist: String(match.artist ?? '').slice(0, 200),
+        album: String(match.album ?? '').slice(0, 200),
+        cover: typeof match.cover === 'string' ? match.cover : undefined,
+        preview: typeof match.preview === 'string' ? match.preview : undefined,
+      },
+    })
+    res.json({ ok: true })
+    return
+  }
+  res.status(400).json({ error: 'Demande invalide.' })
+})
+
+app.get('/api/deezer-search', async (req, res) => {
+  if (!requireHost(req, res)) return
+  const query = String(req.query.q ?? '').slice(0, 200)
+  res.json(query ? await searchTracks(query) : [])
+})
+
+app.post('/api/override', (req, res) => {
+  if (!requireHost(req, res)) return
+  const { key, match } = req.body ?? {}
+  if (typeof key !== 'string' || !Number.isInteger(match?.id)) {
+    res.status(400).json({ error: 'Demande invalide.' })
+    return
+  }
+  manualOverrides.set(key, match.id)
+  // On met à jour la ligne déjà vérifiée, sans tout relancer.
+  const packId = key.split('/')[0]
+  checkCache.get(packId)?.then((rows) => {
+    const row = rows.find((r) => r.key === key)
+    if (row) row.match = { ...match, kind: 'manual' }
+  })
+  res.json({ ok: true })
 })
 
 /** Images qui illustrent les cartes des packs. */
@@ -222,18 +353,35 @@ function loadWorkImage(room: Room, track: Track): void {
 }
 
 /** Morceaux des packs choisis : la réponse attendue est l'œuvre (jeu, animé, film…). */
-function tracksFromPacks(ids: string[]): Track[] {
+function tracksFromPacks(ids: string[], { withRemoved = false, withAdded = true } = {}): Track[] {
   return ids.flatMap((id) => {
     const pack = findPack(id)!
-    return pack.entries.map(([work, title, artist, aliases], i) => ({
-      id: `${id}:${i}`,
-      uri: '',
-      title,
-      artists: artist ? [artist] : [],
-      work,
-      aliases,
-      searchHint: pack.searchHint,
-    }))
+    const tracks: Track[] = pack.entries
+      .filter(([work]) => withRemoved || !removedWorks.has(overrideKey(id, work)))
+      .map(([work, title, artist, aliases], i) => ({
+        id: `${id}:${i}`,
+        uri: '',
+        title,
+        artists: artist ? [artist] : [],
+        work,
+        aliases,
+        searchHint: pack.searchHint,
+        deezerId: manualOverrides.get(overrideKey(id, work)) ?? DEEZER_OVERRIDES[overrideKey(id, work)],
+      }))
+    if (withAdded) {
+      for (const [key, added] of addedWorks) {
+        if (added.packId !== id || removedWorks.has(key)) continue
+        tracks.push({
+          id: `${id}:ajout-${tracks.length}`,
+          uri: '',
+          title: added.match.title,
+          artists: [added.match.artist],
+          work: added.work,
+          deezerId: added.match.id,
+        })
+      }
+    }
+    return tracks
   })
 }
 

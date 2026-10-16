@@ -6,16 +6,28 @@ const DEEZER_API = process.env.DEEZER_API ?? 'https://api.deezer.com'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-interface DeezerTrack {
+export interface DeezerTrack {
   id?: number
   preview?: string
   title?: string
   artist?: { name?: string }
   album?: { title?: string; cover_xl?: string; cover_big?: string }
+  /** Popularité du morceau sur Deezer. */
+  rank?: number
   error?: { code?: number; message?: string }
 }
 
+/** Deezer accepte environ 50 requêtes toutes les 5 secondes : on en envoie au plus une toutes les 120 ms. */
+let nextSlot = 0
+async function throttle(): Promise<void> {
+  const now = Date.now()
+  const wait = Math.max(0, nextSlot - now)
+  nextSlot = Math.max(now, nextSlot) + 120
+  if (wait > 0) await sleep(wait)
+}
+
 async function deezerGet<T extends { error?: DeezerTrack['error'] }>(path: string, attempt = 0): Promise<T> {
+  await throttle()
   const res = await fetch(`${DEEZER_API}${path}`)
   const data = (await res.json()) as T
   // Code 4 = trop de requêtes : Deezer accepte environ 50 requêtes toutes les 5 secondes.
@@ -26,66 +38,127 @@ async function deezerGet<T extends { error?: DeezerTrack['error'] }>(path: strin
   return data
 }
 
-async function search(query: string, limit = 5): Promise<DeezerTrack[]> {
+async function search(query: string, limit: number): Promise<DeezerTrack[]> {
   const result = await deezerGet<{ data?: DeezerTrack[]; error?: DeezerTrack['error'] }>(
     `/search?limit=${limit}&q=${encodeURIComponent(query)}`,
   )
   return (result.data ?? []).filter((t) => t.id && t.preview)
 }
 
-const STOP_WORDS = new Set(['the', 'and', 'les', 'des', 'une', 'pour', 'from', 'main', 'theme', 'with', 'dans'])
+const STOP_WORDS = new Set(['the', 'and', 'les', 'des', 'une', 'from', 'with', 'dans', 'pour', 'aux', 'est'])
 
-/** Mots significatifs d'un texte (pour vérifier qu'un résultat de recherche a un rapport). */
+/** Mots significatifs d'un texte. */
 function keywords(text: string): string[] {
-  return normalizeText(text)
-    .split(' ')
-    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w))
+  return [...new Set(normalizeText(text).split(' '))].filter((w) => w.length >= 3 && !STOP_WORDS.has(w))
 }
 
-/** Un résultat de recherche « large » n'est gardé que s'il partage un mot avec le morceau ou l'œuvre. */
-function looksRelated(result: DeezerTrack, track: Track): boolean {
-  const haystack = normalizeText(`${result.title ?? ''} ${result.album?.title ?? ''} ${result.artist?.name ?? ''}`)
-  const wanted = [...keywords(track.title), ...keywords(track.work ?? '')]
-  return wanted.length === 0 || wanted.some((w) => haystack.includes(w))
+/** Part des mots de `wanted` présents dans `text` (0 à 1). */
+function coverage(wanted: string, text: string): number {
+  const words = keywords(wanted)
+  if (words.length === 0) return 0
+  const haystack = ` ${normalizeText(text)} `
+  return words.filter((w) => haystack.includes(` ${w} `)).length / words.length
 }
 
-/** Morceau trouvé sur Deezer : son id, et la pochette de l'album (image de secours). */
+function sameArtist(expected: string, found: string | undefined): boolean {
+  const a = normalizeText(expected)
+  const b = normalizeText(found ?? '')
+  return a.length > 0 && b.length > 0 && (a.includes(b) || b.includes(a))
+}
+
+/** Versions qu'on ne veut jamais : elles déforment trop la musique pour qu'on la reconnaisse. */
+const UNWANTED =
+  /\b(remix|rmx|dubstep|trap|nightcore|slowed|sped up|speed up|reverb|karaoke|lofi|lo fi|medley|mashup|8d|bass boosted|drill|phonk|tiktok|parody|parodie)\b/
+
+/** Comment le morceau a été trouvé : version exacte, version choisie à la main, ou reprise. */
+export type MatchKind = 'exact' | 'manual' | 'cover'
+
+/** Morceau trouvé sur Deezer. */
 export interface DeezerMatch {
   id: number
+  kind: MatchKind
+  title: string
+  artist: string
+  album: string
+  /** Pochette de l'album (image de secours pour la révélation). */
   cover?: string
+  /** Lien de l'extrait (il expire au bout de quelques heures). */
+  preview?: string
 }
 
-function toMatch(t: DeezerTrack): DeezerMatch {
-  return { id: t.id!, cover: t.album?.cover_xl ?? t.album?.cover_big }
+function toMatch(t: DeezerTrack, kind: MatchKind): DeezerMatch {
+  return {
+    id: t.id!,
+    kind,
+    title: t.title ?? '',
+    artist: t.artist?.name ?? '',
+    album: t.album?.title ?? '',
+    cover: t.album?.cover_xl ?? t.album?.cover_big,
+    preview: t.preview,
+  }
 }
 
 /**
- * Retrouve le morceau sur Deezer. Dans l'ordre : par son ISRC, par titre + artiste exacts, puis par
- * des recherches plus larges (vérifiées) — utile pour les packs, où le morceau officiel n'est pas
- * toujours sur Deezer mais une reprise reconnaissable l'est.
+ * Choisit, parmi des résultats de recherche, la version la plus connue (rang Deezer) qui correspond
+ * vraiment au morceau voulu. `exactArtist` : on exige aussi le bon artiste. Rien plutôt qu'une erreur.
+ */
+export function pickBest(results: DeezerTrack[], track: Track, exactArtist: boolean): DeezerTrack | null {
+  const artist = track.artists[0] ?? ''
+  const workWords = keywords(track.work ?? '')
+  const candidates = results.filter((r) => {
+    const title = r.title ?? ''
+    const text = normalizeText(`${title} ${r.album?.title ?? ''}`)
+    if (UNWANTED.test(text)) return false
+    const artistOk = artist !== '' && sameArtist(artist, r.artist?.name)
+    if (exactArtist) return artistOk && coverage(track.title, title) >= 0.5
+    if (coverage(track.title, title) < 0.6) return false
+    // Une reprise doit au moins venir de l'œuvre (titre ou album) ou du bon artiste.
+    const fromWork = workWords.length === 0 || workWords.some((w) => ` ${text} `.includes(` ${w} `))
+    return artistOk || fromWork
+  })
+  candidates.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+  return candidates[0] ?? null
+}
+
+/**
+ * Retrouve le morceau sur Deezer, dans l'ordre :
+ * 1. la version fixée à la main (vérifiée) ;
+ * 2. par son ISRC (playlists Spotify) ;
+ * 3. titre + artiste exacts ;
+ * 4. une version connue et fidèle (utile pour Nintendo, absent des plateformes de streaming).
  */
 export async function findDeezerTrack(track: Track): Promise<DeezerMatch | null> {
+  if (track.deezerId) {
+    const found = await deezerGet<DeezerTrack>(`/track/${track.deezerId}`)
+    if (found.id && found.preview) return toMatch(found, 'manual')
+  }
   if (track.isrc) {
     const found = await deezerGet<DeezerTrack>(`/track/isrc:${encodeURIComponent(track.isrc)}`)
-    if (found.id && found.preview) return toMatch(found)
+    if (found.id && found.preview) return toMatch(found, 'exact')
   }
-  const title = track.title.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '')
+  const title = track.title.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '') || track.title
   const artist = track.artists[0] ?? ''
   if (artist) {
-    const exact = await search(`artist:"${artist}" track:"${title}"`, 1)
-    if (exact[0]?.id) return toMatch(exact[0])
+    const exact = pickBest(await search(`artist:"${artist}" track:"${title}"`, 10), track, true)
+    if (exact) return toMatch(exact, 'exact')
+    const loose = pickBest(await search(`${title} ${artist}`, 15), track, true)
+    if (loose) return toMatch(loose, 'exact')
   }
-  const broad = [
-    artist ? `${title} ${artist}` : null,
+  const queries = [
+    track.work ? `${title} ${track.work}` : null,
     track.work && track.searchHint ? `${track.searchHint} ${track.work}` : null,
-    track.work ? `${track.work} ${title}` : null,
-    track.work ? `${track.work} theme` : null,
+    title,
   ].filter((q): q is string => q !== null)
-  for (const query of broad) {
-    const match = (await search(query)).find((r) => looksRelated(r, track))
-    if (match?.id) return toMatch(match)
+  for (const query of queries) {
+    const cover = pickBest(await search(query, 25), track, false)
+    if (cover) return toMatch(cover, 'cover')
   }
   return null
+}
+
+/** Recherche libre (page de vérification des packs). */
+export async function searchTracks(query: string): Promise<DeezerMatch[]> {
+  return (await search(query, 15)).map((t) => toMatch(t, 'manual'))
 }
 
 /**
@@ -120,7 +193,6 @@ export async function findPlayableTracks(
       } catch {
         // morceau ignoré si Deezer ne répond pas
       }
-      await sleep(100)
     }
   }
   await Promise.all([worker(), worker(), worker()])
