@@ -5,7 +5,9 @@ import { getAccessToken } from './auth.ts'
 interface PlaybackState {
   paused: boolean
   position: number
-  track_window: { current_track: { uri: string } | null }
+  /** Moment (horloge du navigateur, en ms) où `position` a été mesurée. */
+  timestamp?: number
+  track_window: { current_track: { uri: string; linked_from?: { uri: string | null } } | null }
 }
 
 interface SdkPlayer {
@@ -56,16 +58,24 @@ const ERRORS: Record<string, string> = {
   account_error: 'Il faut un compte Spotify Premium pour jouer le son.',
 }
 
-/** Joue des extraits d'un morceau depuis son début, d'une durée précise. */
+/**
+ * Joue des extraits d'un morceau depuis son début, d'une durée précise.
+ *
+ * On ne se fie pas aux événements du lecteur (pas toujours envoyés à temps) : on interroge son
+ * état en boucle, et on coupe toujours le son à la fin, quoi qu'il arrive.
+ */
 export class SnippetPlayer {
-  private loadedUri: string | null = null
   private playId = 0
-  private volume = 0.8
 
   private constructor(
     private readonly player: SdkPlayer,
-    readonly deviceId: string,
-  ) {}
+    private deviceId: string,
+  ) {
+    // Si le lecteur se reconnecte, Spotify peut lui donner un nouvel identifiant.
+    player.addListener('ready', ({ device_id }) => {
+      this.deviceId = device_id
+    })
+  }
 
   static async create(onError: (message: string) => void): Promise<SnippetPlayer> {
     await loadSdk()
@@ -97,51 +107,38 @@ export class SnippetPlayer {
     return this.player.activateElement()
   }
 
-  setVolume(volume: number): Promise<void> {
-    this.volume = volume
-    return this.player.setVolume(volume)
-  }
-
-  /** Attend un état du lecteur qui vérifie la condition (ou échoue après le délai). */
-  private waitForState(check: (s: PlaybackState) => boolean, timeoutMs = 8000): Promise<PlaybackState> {
-    return new Promise((resolve, reject) => {
-      const onChange = (state: PlaybackState | null) => {
-        if (state && check(state)) {
-          cleanup()
-          resolve(state)
-        }
-      }
-      const timer = setTimeout(() => {
-        cleanup()
-        reject(new Error('Le lecteur Spotify ne répond pas.'))
-      }, timeoutMs)
-      const cleanup = () => {
-        clearTimeout(timer)
-        this.player.removeListener('player_state_changed', onChange)
-      }
-      this.player.addListener('player_state_changed', onChange)
-      this.player.getCurrentState().then(onChange)
-    })
-  }
-
-  /** Charge le morceau en silence et le met en pause au tout début. */
-  async load(uri: string): Promise<void> {
-    if (this.loadedUri === uri) return
-    this.playId++
-    await this.player.setVolume(0)
-    try {
-      await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ uris: [uri], position_ms: 0 }),
-      })
-      await this.waitForState((s) => !s.paused && s.track_window.current_track !== null)
-      await this.player.pause()
-      await this.waitForState((s) => s.paused)
-      await this.player.seek(0)
-      this.loadedUri = uri
-    } finally {
-      await this.player.setVolume(this.volume)
+  /** Interroge l'état du lecteur jusqu'à ce que la condition soit vraie (null si délai dépassé). */
+  private async waitFor(check: (s: PlaybackState) => boolean, timeoutMs: number): Promise<PlaybackState | null> {
+    const end = performance.now() + timeoutMs
+    while (performance.now() < end) {
+      const state = await this.player.getCurrentState()
+      if (state && check(state)) return state
+      await sleep(30)
     }
+    return null
+  }
+
+  private isPlaying(state: PlaybackState, uri: string): boolean {
+    const track = state.track_window.current_track
+    return !state.paused && track !== null && (track.uri === uri || track.linked_from?.uri === uri)
+  }
+
+  /** Coupe le son et vérifie qu'il est vraiment coupé ; sinon on passe par l'API web de Spotify. */
+  private async forcePause(): Promise<void> {
+    await this.player.pause().catch(() => {})
+    if (await this.waitFor((s) => s.paused, 800)) return
+    await spotifyFetch(`/me/player/pause?device_id=${this.deviceId}`, { method: 'PUT' }).catch(() => {})
+  }
+
+  /** Lance le morceau depuis le début et attend qu'il joue vraiment. */
+  private async startFromBeginning(uri: string): Promise<PlaybackState> {
+    await spotifyFetch(`/me/player/play?device_id=${this.deviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ uris: [uri], position_ms: 0 }),
+    })
+    const state = await this.waitFor((s) => this.isPlaying(s, uri), 6000)
+    if (!state) throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
+    return state
   }
 
   /**
@@ -149,29 +146,38 @@ export class SnippetPlayer {
    * `onStart` est appelé quand le son démarre vraiment (pour lancer la barre de progression).
    */
   async playSnippet(uri: string, durationMs: number, onStart?: () => void): Promise<void> {
-    await this.load(uri)
     const id = ++this.playId
-    await this.player.pause()
-    await this.player.seek(0)
-    await this.player.resume()
-    const state = await this.waitForState((s) => !s.paused)
-    if (id !== this.playId) return
-    onStart?.()
-    await sleep(Math.max(0, durationMs - state.position))
-    if (id === this.playId) await this.player.pause()
+    // Filet de sécurité : même si quelque chose bloque, le son est coupé.
+    const safety = setTimeout(() => {
+      if (id === this.playId) this.forcePause()
+    }, durationMs + 8000)
+    try {
+      await this.player.pause().catch(() => {})
+      const state = await this.startFromBeginning(uri)
+      if (id !== this.playId) return
+      onStart?.()
+      // Temps déjà joué au moment où on a lu l'état du lecteur.
+      // (on ignore la valeur si elle n'a pas l'air d'être un horodatage récent)
+      const age = state.timestamp ? Date.now() - state.timestamp : 0
+      const sinceMeasure = age > 0 && age < 1000 ? age : 0
+      const end = performance.now() + durationMs - state.position - sinceMeasure
+      // Attente découpée, pour s'arrêter tout de suite si un autre extrait est lancé entre-temps.
+      while (id === this.playId && performance.now() < end) await sleep(Math.min(50, end - performance.now()))
+    } finally {
+      clearTimeout(safety)
+      if (id === this.playId) await this.forcePause()
+    }
   }
 
   /** Révélation : on laisse le morceau tourner depuis le début. */
   async playFull(uri: string): Promise<void> {
-    await this.load(uri)
     this.playId++
-    await this.player.seek(0)
-    await this.player.resume()
+    await this.startFromBeginning(uri)
   }
 
   async stop(): Promise<void> {
     this.playId++
-    await this.player.pause()
+    await this.forcePause()
   }
 
   disconnect(): void {
