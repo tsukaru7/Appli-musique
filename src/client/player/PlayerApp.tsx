@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
 import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
+import { detectSoundStart } from '../audio.ts'
 import { socket } from '../socket.ts'
 
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
@@ -368,9 +369,39 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
 function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
   const audio = useRef<HTMLAudioElement>(null)
   const frame = useRef(0)
+  /** Moment où le son commence vraiment dans l'extrait (on saute le silence du début). */
+  const soundStart = useRef(0)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const wrongGuesses = useWrongGuesses(room.code, room.roundNumber)
+  const src = `/api/preview/${room.code}/${room.roundNumber}`
+
+  // On télécharge l'extrait une fois, et on repère où le son commence.
+  useEffect(() => {
+    let cancelled = false
+    let url: string | null = null
+    setAudioUrl(null)
+    soundStart.current = 0
+    fetch(src)
+      .then((res) => {
+        if (!res.ok) throw new Error('indisponible')
+        return res.arrayBuffer()
+      })
+      .then(async (data) => {
+        const blobUrl = URL.createObjectURL(new Blob([data], { type: 'audio/mpeg' }))
+        const start = await detectSoundStart(data.slice(0))
+        if (cancelled) return URL.revokeObjectURL(blobUrl)
+        url = blobUrl
+        soundStart.current = start
+        setAudioUrl(blobUrl)
+      })
+      .catch(() => !cancelled && setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant."))
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [src])
   const mine = room.roundResults.find((r) => r.playerId === playerId)
   const stage = mine?.stage ?? 0
   const done = mine?.status === 'correct' || mine?.status === 'out'
@@ -387,8 +418,9 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
       const el = audio.current
       if (!el) return
       const durationMs = SNIPPET_DURATIONS_MS[s]
+      const start = soundStart.current
       stop()
-      el.currentTime = 0
+      el.currentTime = start
       try {
         await el.play()
       } catch {
@@ -398,7 +430,7 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
       setError(null)
       setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
       const tick = () => {
-        if (el.paused || el.currentTime * 1000 >= durationMs) el.pause()
+        if (el.paused || (el.currentTime - start) * 1000 >= durationMs) el.pause()
         else frame.current = requestAnimationFrame(tick)
       }
       tick()
@@ -421,12 +453,7 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
 
   return (
     <section className="stack">
-      <audio
-        ref={audio}
-        preload="auto"
-        src={`/api/preview/${room.code}/${room.roundNumber}`}
-        onError={() => setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant.")}
-      />
+      <audio ref={audio} preload="auto" src={audioUrl ?? undefined} />
       <RoundHeader room={room} points={done ? undefined : POINTS_BY_STAGE[stage]} />
 
       {mine?.status === 'correct' ? (
@@ -449,7 +476,8 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
         <>
           <PlayRing
             onClick={() => play(stage)}
-            label={`Écouter ${seconds(stage)}`}
+            disabled={!audioUrl}
+            label={audioUrl ? `Écouter ${seconds(stage)}` : 'Chargement de l’extrait…'}
             progressKey={progress?.key}
             progressMs={progress?.ms}
           />

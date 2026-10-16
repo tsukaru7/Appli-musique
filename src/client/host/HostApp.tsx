@@ -180,6 +180,9 @@ function Host({
   const [current, setCurrent] = useState<{ track: Track; stage: number } | null>(null)
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const [playing, setPlaying] = useState(false)
+  /** Mode Spotify : silence à sauter au début du morceau en cours (réglé par l'hôte). */
+  const [skipMs, setSkipMs] = useState(0)
+  const skipRef = useRef(0)
   const [chosenMode, setChosenMode] = useState<GameMode>(() =>
     localStorage.getItem('gameMode') === 'spotify' ? 'spotify' : 'deezer',
   )
@@ -249,10 +252,15 @@ function Host({
       const durationMs = SNIPPET_DURATIONS_MS[stage]
       setPlaying(true)
       try {
-        await player.playSnippet(track.uri, durationMs, () => {
-          setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
-          socket.emit('host:snippet', { stage, durationMs })
-        })
+        await player.playSnippet(
+          track.uri,
+          durationMs,
+          () => {
+            setProgress((p) => ({ key: (p?.key ?? 0) + 1, ms: durationMs }))
+            socket.emit('host:snippet', { stage, durationMs })
+          },
+          skipRef.current,
+        )
       } catch (err) {
         setPlayerError((err as Error).message)
       } finally {
@@ -275,6 +283,20 @@ function Host({
   useEffect(() => {
     if (player && phase === 'playing') player.stop().catch(() => {})
   }, [player, phase, roundNumber])
+
+  // Le silence sauté ne vaut que pour le morceau en cours.
+  useEffect(() => {
+    skipRef.current = 0
+    setSkipMs(0)
+  }, [roundNumber])
+
+  /** Le morceau commence par un silence : on décale le départ d'une seconde et on rejoue. */
+  const skipSilence = () => {
+    if (!current) return
+    skipRef.current += 1000
+    setSkipMs(skipRef.current)
+    playSnippet(current.track, current.stage)
+  }
 
   // Révélation : on laisse tourner le morceau ; fin de partie : on coupe.
   useEffect(() => {
@@ -417,6 +439,16 @@ function Host({
                     <button className="btn btn-ghost" onClick={() => socket.emit('host:reveal')}>
                       <Icon name="eye" size={18} />
                       Révéler
+                    </button>
+                  </div>
+                  <div className="silence">
+                    <span className="muted small">
+                      {skipMs > 0
+                        ? `Départ décalé de ${skipMs / 1000} s pour sauter le silence.`
+                        : 'Le morceau commence par un silence ?'}
+                    </span>
+                    <button className="btn btn-ghost" disabled={!current || playing || skipMs >= 15000} onClick={skipSilence}>
+                      Sauter 1 s de silence
                     </button>
                   </div>
                 </div>

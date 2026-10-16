@@ -67,8 +67,8 @@ class FakePlayer {
   async resume() {
     this.paused = false
   }
-  async seek() {
-    this.startedAt = Date.now()
+  async seek(positionMs: number) {
+    this.startedAt = Date.now() - positionMs
   }
   async setVolume(volume: number) {
     this.volume = volume
@@ -145,5 +145,13 @@ describe('SnippetPlayer', () => {
     apiCalls.length = 0
     await player.playSnippet('spotify:track:x', 300)
     expect(apiCalls.filter((p) => p.startsWith('/me/player/play'))).toHaveLength(0)
+  })
+
+  it('peut sauter le silence du début (départ décalé)', async () => {
+    const player = await newPlayer()
+    await player.playSnippet('spotify:track:x', 1000, undefined, 3000)
+    // Le son a été coupé vers 4 s dans le morceau : 3 s sautées + 1 s d'extrait.
+    expect(fake.pauses.at(-1)).toBeGreaterThanOrEqual(3950)
+    expect(fake.pauses.at(-1)).toBeLessThan(4150)
   })
 })

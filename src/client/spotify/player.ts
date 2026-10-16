@@ -159,15 +159,17 @@ export class SnippetPlayer {
     }
   }
 
-  /** Repart du début du morceau (déjà chargé, donc sans passer par Spotify) et attend que ça joue. */
-  private async resumeFromBeginning(uri: string): Promise<PlaybackState> {
+  /**
+   * Repart du début du morceau (ou de `startMs`), sans repasser par Spotify s'il est déjà chargé,
+   * et attend que ça joue.
+   */
+  private async resumeFromBeginning(uri: string, startMs = 0): Promise<PlaybackState> {
     const state = await this.player.getCurrentState()
     const loaded = state?.track_window.current_track
     if (this.loadedUri !== uri || !loaded || (loaded.uri !== uri && loaded.linked_from?.uri !== uri)) {
       await this.prepare(uri)
-    } else {
-      await this.player.seek(0)
     }
+    await this.player.seek(startMs)
     await this.player.resume()
     const playing = await this.waitFor((s) => this.isPlaying(s, uri), 6000)
     if (!playing) throw new Error('Le lecteur Spotify ne démarre pas. Recharge la page.')
@@ -177,8 +179,9 @@ export class SnippetPlayer {
   /**
    * Joue les `durationMs` premières millisecondes du morceau.
    * `onStart` est appelé quand le son démarre vraiment (pour lancer la barre de progression).
+   * `startMs` permet de sauter un silence au début du morceau.
    */
-  async playSnippet(uri: string, durationMs: number, onStart?: () => void): Promise<void> {
+  async playSnippet(uri: string, durationMs: number, onStart?: () => void, startMs = 0): Promise<void> {
     const id = ++this.playId
     // Filet de sécurité : même si quelque chose bloque, le son est coupé.
     const safety = setTimeout(() => {
@@ -186,14 +189,15 @@ export class SnippetPlayer {
     }, durationMs + 12000)
     try {
       await this.player.pause().catch(() => {})
-      const state = await this.resumeFromBeginning(uri)
+      const state = await this.resumeFromBeginning(uri, startMs)
       if (id !== this.playId) return
       onStart?.()
       // Temps déjà joué au moment où on a lu l'état du lecteur.
       // (on ignore la valeur si elle n'a pas l'air d'être un horodatage récent)
       const age = state.timestamp ? Date.now() - state.timestamp : 0
       const sinceMeasure = age > 0 && age < 1000 ? age : 0
-      const end = performance.now() + durationMs - state.position - sinceMeasure
+      const played = Math.max(0, state.position - startMs)
+      const end = performance.now() + durationMs - played - sinceMeasure
       // Attente découpée, pour s'arrêter tout de suite si un autre extrait est lancé entre-temps.
       while (id === this.playId && performance.now() < end) await sleep(Math.min(50, end - performance.now()))
     } finally {
