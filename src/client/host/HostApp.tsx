@@ -386,7 +386,13 @@ function Host({
     }
   }, [phase, roomCode, roundNumber, audio, player, current, preview])
 
+  const [confirmQuit, setConfirmQuit] = useState(false)
+
+  /** Ferme la partie (les joueurs sont prévenus) et revient à l'accueil. */
   const newGame = () => {
+    // Partie finie : on laisse le classement affiché sur les téléphones.
+    if (room && room.phase !== 'finished') socket.emit('host:end')
+    setConfirmQuit(false)
     setShowHome(true)
     localStorage.removeItem(SESSION_KEY)
     setSession(null)
@@ -426,7 +432,13 @@ function Host({
   return (
     <div className="app">
       <header className="appbar">
-        <Wordmark />
+        <button
+          className="wordmark-button"
+          title="Accueil"
+          onClick={() => (room && room.phase !== 'finished' ? setConfirmQuit(true) : newGame())}
+        >
+          <Wordmark />
+        </button>
         {/* L'état du son n'a de sens qu'une fois la partie créée, ou pour le lecteur Spotify. */}
         {(room || audio === 'spotify') && (
           <span className={`pill tone-${status.tone}`}>
@@ -435,6 +447,12 @@ function Host({
           </span>
         )}
         <span className="appbar-user">
+          {room && room.phase !== 'finished' && (
+            <button className="btn btn-ghost" onClick={() => setConfirmQuit(true)}>
+              <Icon name="cross" size={16} />
+              Quitter la partie
+            </button>
+          )}
           {loggedIn && (
             <>
               <span className="muted">{userName}</span>
@@ -445,6 +463,25 @@ function Host({
           )}
         </span>
       </header>
+
+      {confirmQuit && (
+        <div className="dialog-backdrop" onClick={() => setConfirmQuit(false)}>
+          <div className="dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h2 className="display">Quitter la partie ?</h2>
+            <p className="muted">
+              La partie sera terminée pour tout le monde{room?.solo ? '' : ' : les joueurs reviendront à l’écran d’accueil'}.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" autoFocus onClick={() => setConfirmQuit(false)}>
+                Continuer à jouer
+              </button>
+              <button className="btn btn-primary" onClick={newGame}>
+                Quitter et revenir à l'accueil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="page">
         {(!session || !room) && showHome ? (

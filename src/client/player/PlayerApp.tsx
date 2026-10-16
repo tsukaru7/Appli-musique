@@ -71,9 +71,19 @@ export function PlayerApp() {
   }
 
   useEffect(() => {
+    // L'hôte a fermé la partie : retour à l'écran pour rejoindre.
+    const onClosed = () => {
+      localStorage.removeItem(SESSION_KEY)
+      setJoined(false)
+      setRoom(null)
+      setCode('')
+      setError("La partie est terminée : l'hôte l'a fermée.")
+    }
     socket.on('room:update', setRoom)
+    socket.on('room:closed', onClosed)
     return () => {
       socket.off('room:update', setRoom)
+      socket.off('room:closed', onClosed)
     }
   }, [])
 
@@ -144,8 +154,9 @@ export function PlayerApp() {
           <span className="muted">{me?.score ?? 0} pts</span>
         </span>
         <span className="mono muted">{room.code}</span>
-        <button className="btn-icon" onClick={leave} title="Quitter la partie">
-          <Icon name="logout" size={18} />
+        <button className="btn btn-ghost" onClick={leave}>
+          <Icon name="logout" size={16} />
+          Quitter
         </button>
       </header>
 

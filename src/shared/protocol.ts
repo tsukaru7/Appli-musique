@@ -103,6 +103,8 @@ export interface ClientToServerEvents {
   'host:reveal': () => void
   'host:nextRound': () => void
   'host:snippet': (payload: { stage: number; durationMs: number }) => void
+  /** L'hôte quitte la partie : elle est fermée pour tout le monde. */
+  'host:end': () => void
   'player:join': (
     payload: { code: string; name: string; playerId: string },
     ack: (res: { ok: true; options: AnswerOption[] } | { ok: false; error: string }) => void,
@@ -119,4 +121,6 @@ export interface ServerToClientEvents {
   'snippet:start': (payload: { stage: number; durationMs: number }) => void
   /** Retour personnel au joueur après une proposition. */
   'player:feedback': (payload: { correct: boolean; guessLabel: string; points: number }) => void
+  /** La partie a été fermée par l'hôte. */
+  'room:closed': () => void
 }

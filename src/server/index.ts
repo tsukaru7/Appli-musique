@@ -485,6 +485,16 @@ io.on('connection', (socket: GameSocket) => {
     const room = hostRoom(socket)
     if (room) afterChange(room, room.game.nextRound())
   })
+  socket.on('host:end', () => {
+    const room = hostRoom(socket)
+    if (!room) return
+    const { code } = room.game
+    io.to(code).emit('room:closed')
+    io.in(code).socketsLeave(code)
+    rooms.delete(code)
+    socket.data = {}
+  })
+
   socket.on('host:snippet', ({ stage, durationMs }) => {
     const room = hostRoom(socket)
     if (room) socket.to(room.game.code).emit('snippet:start', { stage, durationMs })
