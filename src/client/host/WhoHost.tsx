@@ -5,11 +5,14 @@ import { Avatar } from '../avatar.tsx'
 import { Icon, PlayRing, Scoreboard, TrackReveal } from '../components.tsx'
 import { socket } from '../socket.ts'
 
-const PER_PLAYER_CHOICES = [2, 3]
+const PER_PLAYER_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10]
 
 /** Réglages : combien de morceaux chaque joueur apporte. */
 export function WhoSetup({ onBack, onCreate }: { onBack: () => void; onCreate: (perPlayer: number) => Promise<void> }) {
-  const [perPlayer, setPerPlayer] = useState(() => (localStorage.getItem('whoPerPlayer') === '3' ? 3 : 2))
+  const [perPlayer, setPerPlayer] = useState(() => {
+    const saved = Number(localStorage.getItem('whoPerPlayer'))
+    return PER_PLAYER_CHOICES.includes(saved) ? saved : 2
+  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -60,6 +63,9 @@ export function WhoSetup({ onBack, onCreate }: { onBack: () => void; onCreate: (
             </button>
           ))}
         </div>
+        <p className="muted small">
+          Avec 4 joueurs, ça fait {4 * perPlayer} morceaux à écouter (environ {Math.round((4 * perPlayer * 50) / 60)} min).
+        </p>
       </section>
 
       <section className="setup-step">

@@ -80,7 +80,7 @@ Projet **privé entre amis**, pas destiné à être publié.
 
 Un troisième jeu, entre amis (au moins 2 joueurs), sans compte à connecter :
 
-1. L'hôte choisit le nombre de morceaux par joueur (2 ou 3) et crée la partie.
+1. L'hôte choisit le nombre de morceaux par joueur (de 1 à 10) et crée la partie.
 2. Chacun rejoint avec son téléphone et **choisit ses morceaux en secret** (recherche Deezer, on
    peut écouter avant d'ajouter). Un même morceau ne peut pas être mis deux fois.
 3. Quand tout le monde a choisi, l'hôte lance : les morceaux sont mélangés et joués **sur l'écran

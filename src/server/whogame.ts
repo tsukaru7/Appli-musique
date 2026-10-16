@@ -9,6 +9,8 @@ export const WHO_SPEED_BONUS = 500
 const SPEED_WINDOW_MS = 20000
 /** Points gagnés par celui qui a mis le morceau, pour chaque joueur qui s'est trompé. */
 export const WHO_FOOLED_POINTS = 200
+/** Nombre maximum de morceaux par joueur. */
+export const WHO_MAX_PER_PLAYER = 10
 
 interface Player {
   id: string
@@ -54,7 +56,7 @@ export class WhoGame {
 
   constructor(code: string, perPlayer: number, options: WhoGameOptions = {}) {
     this.code = code
-    this.perPlayer = Math.min(5, Math.max(1, Math.round(perPlayer)))
+    this.perPlayer = Math.min(WHO_MAX_PER_PLAYER, Math.max(1, Math.round(perPlayer)))
     this.random = options.random ?? Math.random
     this.now = options.now ?? Date.now
   }

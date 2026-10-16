@@ -833,7 +833,7 @@ function HomeScreen({ onChoose }: { onChoose: (content: Content) => void }) {
           <span className="game-kicker">Entre amis</span>
           <span className="game-title">Qui a mis ce son ?</span>
           <span className="game-desc">
-            Chacun glisse 2 ou 3 morceaux en secret depuis son téléphone. On les écoute ensemble : à vous de deviner qui
+            Chacun glisse quelques morceaux en secret depuis son téléphone. On les écoute ensemble : à vous de deviner qui
             les a choisis. Sans compte à connecter.
           </span>
         </span>
