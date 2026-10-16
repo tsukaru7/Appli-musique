@@ -51,8 +51,8 @@ Projet **privé entre amis**, pas destiné à être publié.
 ### 🎧 Solo sur cet écran
 
 - Personne à connecter : on écoute et on répond directement sur l'ordinateur, comme sur Songless.
-- Le son vient au choix de Deezer (extraits de 30 s, silence du début sauté automatiquement) ou
-  de Spotify (depuis le début du morceau, Premium requis).
+- Le son vient de Spotify par défaut (le vrai morceau, depuis le début). Deezer reste disponible
+  en secours (extraits de 30 s, silence du début sauté automatiquement).
 - À la fin : le score sur le total possible.
 
 Dans les modes à plusieurs, les joueurs rejoignent la partie via un code ou un QR code, dans le

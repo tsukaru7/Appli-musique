@@ -206,8 +206,9 @@ function Host({
     const saved = localStorage.getItem('setup')
     return saved === 'spotify' || saved === 'solo' ? saved : 'deezer'
   })
+  // En solo on est sur l'ordinateur : Spotify par défaut (morceau joué depuis le début).
   const [soloSource, setSoloSource] = useState<GameMode>(() =>
-    localStorage.getItem('soloSource') === 'spotify' ? 'spotify' : 'deezer',
+    localStorage.getItem('soloSource') === 'deezer' ? 'deezer' : 'spotify',
   )
   const chosenMode: GameMode = setup === 'solo' ? soloSource : setup
   const mode = room?.mode ?? chosenMode
@@ -597,8 +598,8 @@ const SETUPS: { id: Setup; icon: IconName; title: string; text: string }[] = [
 ]
 
 const SOURCES: { id: GameMode; title: string; text: string }[] = [
-  { id: 'deezer', title: 'Deezer', text: 'Extraits de 30 s, silence du début sauté automatiquement' },
-  { id: 'spotify', title: 'Spotify', text: 'Depuis le début du morceau · Premium requis' },
+  { id: 'spotify', title: 'Spotify', text: 'Le vrai morceau, depuis le début' },
+  { id: 'deezer', title: 'Deezer', text: 'Plan B si Spotify ne lit pas : extraits de 30 s, silence sauté tout seul' },
 ]
 
 const ROUND_CHOICES = [5, 10, 15, 20, 30]
