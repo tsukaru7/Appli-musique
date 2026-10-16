@@ -1323,6 +1323,49 @@ input:focus {
   align-self: flex-start;
 }
 
+/* ---------- Solo ---------- */
+
+.source-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.solo-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 480px;
+  margin: 40px auto 0;
+}
+
+.solo-ready .stack {
+  align-items: flex-start;
+}
+
+.solo-play {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.solo-score {
+  font-family: var(--font-display);
+  font-size: 4.5rem;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.solo-score span {
+  font-size: 0.4em;
+  color: var(--faint);
+}
+
 /* ---------- Petits écrans ---------- */
 
 @media (max-width: 760px) {

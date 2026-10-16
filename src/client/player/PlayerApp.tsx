@@ -3,7 +3,7 @@ import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
 import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
 import { detectSoundStart } from '../audio.ts'
-import { socket } from '../socket.ts'
+import { socket, useSocket } from '../socket.ts'
 
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
 function playerId(): string {
@@ -190,7 +190,7 @@ export function PlayerApp() {
   )
 }
 
-function RoundHeader({ room, points }: { room: RoomView; points?: number }) {
+export function RoundHeader({ room, points }: { room: RoomView; points?: number }) {
   return (
     <div className="round-head">
       <div>
@@ -224,7 +224,8 @@ function MyResult({ room, playerId }: { room: RoomView; playerId: string }) {
 }
 
 /** Mauvaises réponses de la manche en cours (gardées si la page est rechargée). */
-function useWrongGuesses(code: string, roundNumber: number): string[] {
+export function useWrongGuesses(code: string, roundNumber: number): string[] {
+  const socket = useSocket()
   const key = `wrongGuesses:${code}:${roundNumber}`
   const [wrongGuesses, setWrongGuesses] = useState<string[]>(() => {
     try {
@@ -257,11 +258,11 @@ function useWrongGuesses(code: string, roundNumber: number): string[] {
     return () => {
       socket.off('player:feedback', onFeedback)
     }
-  }, [key])
+  }, [key, socket])
   return wrongGuesses
 }
 
-function WrongGuesses({ guesses }: { guesses: string[] }) {
+export function WrongGuesses({ guesses }: { guesses: string[] }) {
   if (guesses.length === 0) return null
   return (
     <ul className="wrong-list">
@@ -276,7 +277,8 @@ function WrongGuesses({ guesses }: { guesses: string[] }) {
 }
 
 /** Champ de réponse avec autocomplétion sur les morceaux de la playlist. */
-function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNumber: number }) {
+export function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNumber: number }) {
+  const socket = useSocket()
   const [query, setQuery] = useState('')
   const suggestions = useMemo(() => filterOptions(options, query), [options, query])
   useEffect(() => setQuery(''), [roundNumber])
@@ -325,6 +327,7 @@ function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNu
 
 /** Mode Spotify : l'extrait sort de l'ordinateur de l'hôte, tout le monde avance ensemble. */
 function Round({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
+  const socket = useSocket()
   const [progress, setProgress] = useState<{ key: number; ms: number } | null>(null)
   const wrongGuesses = useWrongGuesses(room.code, room.roundNumber)
   const mine = room.roundResults.find((r) => r.playerId === playerId)
@@ -336,7 +339,7 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
     return () => {
       socket.off('snippet:start', onSnippet)
     }
-  }, [])
+  }, [socket])
 
   return (
     <section className="stack">
@@ -366,7 +369,8 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
 }
 
 /** Mode Deezer : chaque téléphone joue son extrait et le joueur avance à son rythme. */
-function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
+export function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: string; options: AnswerOption[] }) {
+  const socket = useSocket()
   const audio = useRef<HTMLAudioElement>(null)
   const frame = useRef(0)
   /** Moment où le son commence vraiment dans l'extrait (on saute le silence du début). */

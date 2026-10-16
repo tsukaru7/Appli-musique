@@ -208,7 +208,7 @@ function sanitizeTracks(tracks: unknown): Track[] {
 io.on('connection', (socket: GameSocket) => {
   const ip = String(socket.handshake.headers['x-forwarded-for'] ?? socket.handshake.address).split(',')[0].trim()
 
-  socket.on('host:create', async ({ tracks, totalRounds, mode, password }, ack) => {
+  socket.on('host:create', async ({ tracks, totalRounds, mode, solo, password }, ack) => {
     if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     if (!checkPassword(password)) {
       recordFailure(ip)
@@ -232,7 +232,7 @@ io.on('connection', (socket: GameSocket) => {
 
     const code = newCode()
     const room: Room = {
-      game: new Game(code, playable, rounds, { mode: gameMode, answerTracks: clean }),
+      game: new Game(code, playable, rounds, { mode: gameMode, solo: solo === true, answerTracks: clean }),
       hostKey: randomBytes(16).toString('hex'),
       hostSocketId: socket.id,
       options: buildAnswerOptions(clean),

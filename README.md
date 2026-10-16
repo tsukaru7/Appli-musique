@@ -48,7 +48,14 @@ Projet **privé entre amis**, pas destiné à être publié.
 - Tout le monde entend le même extrait : il s'allonge quand tous ceux qui n'ont pas trouvé ont
   répondu ou passé (une réponse par extrait).
 
-Dans les deux modes, les joueurs rejoignent la partie via un code ou un QR code, dans le
+### 🎧 Solo sur cet écran
+
+- Personne à connecter : on écoute et on répond directement sur l'ordinateur, comme sur Songless.
+- Le son vient au choix de Deezer (extraits de 30 s, silence du début sauté automatiquement) ou
+  de Spotify (depuis le début du morceau, Premium requis).
+- À la fin : le score sur le total possible.
+
+Dans les modes à plusieurs, les joueurs rejoignent la partie via un code ou un QR code, dans le
 navigateur, sans rien installer et sans compte. Ils répondent avec une **autocomplétion** sur
 les titres de la playlist.
 

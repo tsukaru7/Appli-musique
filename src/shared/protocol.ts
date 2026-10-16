@@ -55,6 +55,8 @@ export interface PlayerRoundView {
 export interface RoomView {
   code: string
   mode: GameMode
+  /** Partie solo : l'hôte joue seul sur son écran, personne ne rejoint. */
+  solo: boolean
   phase: Phase
   players: PlayerView[]
   totalRounds: number
@@ -67,7 +69,7 @@ export interface RoomView {
 
 export interface ClientToServerEvents {
   'host:create': (
-    payload: { tracks: Track[]; totalRounds: number; mode: GameMode; password?: string },
+    payload: { tracks: Track[]; totalRounds: number; mode: GameMode; solo?: boolean; password?: string },
     ack: (res: { ok: true; code: string; hostKey: string } | { ok: false; error: string }) => void,
   ) => void
   'host:resume': (payload: { code: string; hostKey: string }, ack: (res: { ok: boolean; error?: string }) => void) => void
