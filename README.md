@@ -117,6 +117,10 @@ du type `https://appli-musique.onrender.com` à ouvrir depuis n'importe quel ord
 3. Dans le tableau de bord Spotify, ajouter la *Redirect URI*
    `https://<adresse-render>/callback`.
 
+4. Dans Render, onglet **Environment**, ajouter la variable `HOST_PASSWORD` avec le mot de passe
+   de son choix : il sera demandé pour créer une partie. Les joueurs, eux, n'ont besoin que du
+   code de la partie (les essais de codes au hasard sont limités).
+
 Sur l'offre gratuite, le serveur s'endort après 15 minutes sans visite : la première ouverture
 prend environ une minute.
 

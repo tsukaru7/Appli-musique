@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { filterOptions } from '../../shared/answers.ts'
 import { POINTS_BY_STAGE, SNIPPET_DURATIONS_MS, type AnswerOption, type RoomView } from '../../shared/protocol.ts'
-import { Scoreboard, StageBar, TrackCard } from '../components.tsx'
+import { Icon, PlayRing, Scoreboard, StageBar, TrackReveal, Wordmark, seconds } from '../components.tsx'
 import { socket } from '../socket.ts'
 
 /** Identifiant stable du joueur sur ce téléphone (pour retrouver son score après une coupure). */
@@ -88,88 +88,138 @@ export function PlayerApp() {
 
   if (reconnecting || (joined && !room)) {
     return (
-      <main className="player center">
-        <h1>🎵 Appli-musique</h1>
-        <p className="hint">⏳ Retour dans la partie {code}…</p>
+      <main className="splash">
+        <Wordmark large />
+        <p className="muted">Retour dans la partie {code}…</p>
       </main>
     )
   }
 
   if (!joined || !room) {
     return (
-      <main className="player center">
-        <h1>🎵 Appli-musique</h1>
+      <main className="splash">
+        <Wordmark large />
         <form
-          className="join-form"
+          className="stack narrow"
           onSubmit={(e) => {
             e.preventDefault()
             join(code, name)
           }}
         >
-          <input
-            placeholder="Code de la partie"
-            value={code}
-            maxLength={4}
-            autoCapitalize="characters"
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-          />
-          <input placeholder="Ton pseudo" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} />
-          <button className="primary big" type="submit" disabled={code.length !== 4 || !name.trim()}>
+          <label className="field">
+            <span className="field-label">Code de la partie</span>
+            <input
+              className="code-input"
+              value={code}
+              maxLength={4}
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="ABCD"
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Ton pseudo</span>
+            <input value={name} maxLength={20} autoComplete="nickname" onChange={(e) => setName(e.target.value)} />
+          </label>
+          {error && <p className="notice is-bad">{error}</p>}
+          <button className="btn btn-primary btn-lg" type="submit" disabled={code.length !== 4 || !name.trim()}>
             Rejoindre
+            <Icon name="arrow" size={18} />
           </button>
-          {error && <p className="error">{error}</p>}
         </form>
       </main>
     )
   }
 
+  const me = room.players.find((p) => p.id === id)
+
   return (
-    <main className="player">
-      <header className="topbar">
-        <span className="logo">🎵 {room.code}</span>
-        <span>{name}</span>
-        <span className="score">{room.players.find((p) => p.id === id)?.score ?? 0} pts</span>
-        <button className="link" onClick={leave}>
-          Quitter
+    <div className="app phone">
+      <header className="appbar">
+        <span className="appbar-player">
+          <strong>{name}</strong>
+          <span className="muted">{me?.score ?? 0} pts</span>
+        </span>
+        <span className="mono muted">{room.code}</span>
+        <button className="btn-icon" onClick={leave} title="Quitter la partie">
+          <Icon name="logout" size={18} />
         </button>
       </header>
-      {room.phase === 'lobby' && (
-        <section className="panel center">
-          <h2>C'est bon, tu es dans la partie !</h2>
-          <p className="hint">Regarde l'écran de l'hôte : la partie va bientôt commencer.</p>
-          <p className="hint">{room.players.map((p) => p.name).join(' · ')}</p>
-        </section>
+
+      <main className="page">
+        {room.phase === 'lobby' && (
+          <section className="waiting">
+            <span className="eyebrow">Tu es dans la partie</span>
+            <h1 className="display">Ça commence bientôt</h1>
+            <p className="muted">L'hôte lance la partie dès que tout le monde est là.</p>
+            <ul className="chips">
+              {room.players.map((p) => (
+                <li key={p.id} className={p.id === id ? 'is-me' : ''}>
+                  {p.name}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {room.phase === 'playing' &&
+          (room.mode === 'deezer' ? (
+            <DeezerRound room={room} playerId={id} options={options} />
+          ) : (
+            <Round room={room} playerId={id} options={options} />
+          ))}
+        {room.phase === 'reveal' && room.revealed && (
+          <section className="stack">
+            <RoundHeader room={room} />
+            <TrackReveal track={room.revealed} compact />
+            <MyResult room={room} playerId={id} />
+            <Scoreboard room={room} highlightId={id} />
+          </section>
+        )}
+        {room.phase === 'finished' && (
+          <section className="stack">
+            <span className="eyebrow">Partie terminée</span>
+            <h1 className="display">Classement</h1>
+            <Scoreboard room={room} highlightId={id} />
+          </section>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function RoundHeader({ room, points }: { room: RoomView; points?: number }) {
+  return (
+    <div className="round-head">
+      <div>
+        <span className="eyebrow">Manche</span>
+        <div className="round-count">
+          {room.roundNumber}
+          <span>/{room.totalRounds}</span>
+        </div>
+      </div>
+      {points !== undefined && (
+        <div className="stake">
+          <span className="eyebrow">En jeu</span>
+          <span className="stake-value">{points}</span>
+        </div>
       )}
-      {room.phase === 'playing' &&
-        (room.mode === 'deezer' ? (
-          <DeezerRound room={room} playerId={id} options={options} />
-        ) : (
-          <Round room={room} playerId={id} options={options} />
-        ))}
-      {room.phase === 'reveal' && room.revealed && (
-        <section className="panel">
-          <h2>
-            Manche {room.roundNumber} / {room.totalRounds}
-          </h2>
-          <TrackCard track={room.revealed} />
-          <MyResult room={room} playerId={id} />
-          <Scoreboard room={room} highlightId={id} />
-        </section>
-      )}
-      {room.phase === 'finished' && (
-        <section className="panel center">
-          <h2>🏆 Classement final</h2>
-          <Scoreboard room={room} highlightId={id} />
-        </section>
-      )}
-    </main>
+    </div>
   )
 }
 
 function MyResult({ room, playerId }: { room: RoomView; playerId: string }) {
   const mine = room.roundResults.find((r) => r.playerId === playerId)
-  if (mine?.foundAtStage !== undefined) return <p className="success">✅ Trouvé ! +{mine.points} pts</p>
-  return <p className="hint">Raté pour cette fois…</p>
+  if (mine?.foundAtStage !== undefined) {
+    return (
+      <p className="result is-good">
+        <Icon name="check" size={18} />
+        Trouvé à {seconds(mine.foundAtStage)} · +{mine.points} pts
+      </p>
+    )
+  }
+  return <p className="result">Pas trouvé cette fois.</p>
 }
 
 /** Mauvaises réponses de la manche en cours (gardées si la page est rechargée). */
@@ -213,9 +263,12 @@ function useWrongGuesses(code: string, roundNumber: number): string[] {
 function WrongGuesses({ guesses }: { guesses: string[] }) {
   if (guesses.length === 0) return null
   return (
-    <ul className="wrong-guesses">
+    <ul className="wrong-list">
       {guesses.map((g, i) => (
-        <li key={i}>❌ {g}</li>
+        <li key={i}>
+          <Icon name="cross" size={14} />
+          <span>{g}</span>
+        </li>
       ))}
     </ul>
   )
@@ -233,25 +286,39 @@ function GuessInput({ options, roundNumber }: { options: AnswerOption[]; roundNu
   }
 
   return (
-    <>
+    <div className="guess">
       <form
-        className="guess-form"
         onSubmit={(e) => {
           e.preventDefault()
           if (suggestions.length === 1) submit({ optionId: suggestions[0].id })
           else if (query.trim()) submit({ text: query })
         }}
       >
-        <input placeholder="Tape un titre ou un artiste…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input
+          className="guess-input"
+          placeholder="Titre ou artiste…"
+          value={query}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       </form>
-      <ul className="suggestions">
-        {suggestions.map((s) => (
-          <li key={s.id}>
-            <button onClick={() => submit({ optionId: s.id })}>{s.label}</button>
-          </li>
-        ))}
-      </ul>
-    </>
+      {suggestions.length > 0 && (
+        <ul className="suggestions">
+          {suggestions.map((s) => {
+            const [title, artists] = s.label.split(' — ')
+            return (
+              <li key={s.id}>
+                <button onClick={() => submit({ optionId: s.id })}>
+                  <span className="suggestion-title">{title}</span>
+                  <span className="suggestion-artist">{artists}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -271,24 +338,24 @@ function Round({ room, playerId, options }: { room: RoomView; playerId: string; 
   }, [])
 
   return (
-    <section className="panel">
-      <h2>
-        Manche {room.roundNumber} / {room.totalRounds}
-      </h2>
+    <section className="stack">
+      <RoundHeader room={room} points={mine?.status === 'pending' || !mine ? POINTS_BY_STAGE[room.stage] : undefined} />
+      <PlayRing label={`Écoute l'écran principal · ${seconds(room.stage)}`} progressKey={progress?.key} progressMs={progress?.ms} />
       <StageBar stage={room.stage} progressKey={progress?.key} progressMs={progress?.ms} />
 
       {mine?.status === 'correct' ? (
-        <p className="success big-text">✅ Trouvé ! +{mine.points} pts</p>
-      ) : mine?.status === 'wrong' || mine?.status === 'passed' ? (
-        <p className="hint big-text">
-          {mine.status === 'wrong' ? '❌ Raté' : '⏭️ Passé'} — attends l'extrait suivant…
+        <p className="result is-good">
+          <Icon name="check" size={18} />
+          Trouvé · +{mine.points} pts
         </p>
+      ) : mine?.status === 'wrong' || mine?.status === 'passed' ? (
+        <p className="result">{mine.status === 'wrong' ? 'Raté.' : 'Passé.'} Attends l'extrait suivant…</p>
       ) : (
         <>
-          <p className="hint">C'est quoi ce morceau ? ({POINTS_BY_STAGE[room.stage]} pts en jeu)</p>
           <GuessInput options={options} roundNumber={room.roundNumber} />
-          <button className="pass" onClick={() => socket.emit('player:pass')}>
-            Je ne sais pas → passer
+          <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
+            <Icon name="skip" size={18} />
+            Je ne sais pas
           </button>
         </>
       )}
@@ -325,7 +392,7 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
       try {
         await el.play()
       } catch {
-        setError("Impossible de lire l'extrait. Touche « Écouter » pour réessayer.")
+        setError("Impossible de lire l'extrait. Touche le bouton pour réessayer.")
         return
       }
       setError(null)
@@ -353,34 +420,45 @@ function DeezerRound({ room, playerId, options }: { room: RoomView; playerId: st
   useEffect(() => stop, [stop])
 
   return (
-    <section className="panel">
-      <h2>
-        Manche {room.roundNumber} / {room.totalRounds}
-      </h2>
+    <section className="stack">
       <audio
         ref={audio}
         preload="auto"
         src={`/api/preview/${room.code}/${room.roundNumber}`}
         onError={() => setError("Cet extrait n'a pas pu être chargé. Demande à l'hôte de passer au suivant.")}
       />
-      <StageBar stage={stage} progressKey={progress?.key} progressMs={progress?.ms} />
+      <RoundHeader room={room} points={done ? undefined : POINTS_BY_STAGE[stage]} />
 
       {mine?.status === 'correct' ? (
-        <p className="success big-text">✅ Trouvé ! +{mine.points} pts — attends les autres…</p>
+        <div className="done">
+          <span className="done-badge is-good">
+            <Icon name="check" size={28} />
+          </span>
+          <p className="display">Trouvé à {seconds(mine.foundAtStage ?? 0)}</p>
+          <p className="muted">+{mine.points} pts · on attend les autres</p>
+        </div>
       ) : mine?.status === 'out' ? (
-        <p className="hint big-text">🏳️ Pas trouvé cette fois — attends les autres…</p>
+        <div className="done">
+          <span className="done-badge">
+            <Icon name="flag" size={26} />
+          </span>
+          <p className="display">Pas cette fois</p>
+          <p className="muted">On attend les autres</p>
+        </div>
       ) : (
         <>
-          <button className="primary listen" onClick={() => play(stage)}>
-            ▶️ Écouter ({SNIPPET_DURATIONS_MS[stage] / 1000}s)
-          </button>
-          {error && <p className="error">{error}</p>}
-          <p className="hint">C'est quoi ce morceau ? ({POINTS_BY_STAGE[stage]} pts en jeu)</p>
+          <PlayRing
+            onClick={() => play(stage)}
+            label={`Écouter ${seconds(stage)}`}
+            progressKey={progress?.key}
+            progressMs={progress?.ms}
+          />
+          <StageBar stage={stage} progressKey={progress?.key} progressMs={progress?.ms} />
+          {error && <p className="notice is-bad">{error}</p>}
           <GuessInput options={options} roundNumber={room.roundNumber} />
-          <button className="pass" onClick={() => socket.emit('player:pass')}>
-            {stage < lastStage
-              ? `Passer → extrait de ${SNIPPET_DURATIONS_MS[stage + 1] / 1000}s`
-              : 'Abandonner cette manche'}
+          <button className="btn btn-ghost btn-block" onClick={() => socket.emit('player:pass')}>
+            <Icon name="skip" size={18} />
+            {stage < lastStage ? `Passer · écouter ${seconds(stage + 1)}` : 'Abandonner la manche'}
           </button>
         </>
       )}

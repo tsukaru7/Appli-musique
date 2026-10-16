@@ -67,7 +67,7 @@ export interface RoomView {
 
 export interface ClientToServerEvents {
   'host:create': (
-    payload: { tracks: Track[]; totalRounds: number; mode: GameMode },
+    payload: { tracks: Track[]; totalRounds: number; mode: GameMode; password?: string },
     ack: (res: { ok: true; code: string; hostKey: string } | { ok: false; error: string }) => void,
   ) => void
   'host:resume': (payload: { code: string; hostKey: string }, ack: (res: { ok: boolean; error?: string }) => void) => void

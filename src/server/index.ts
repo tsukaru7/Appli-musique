@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { networkInterfaces } from 'node:os'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { Server, type Socket } from 'socket.io'
@@ -13,6 +13,40 @@ const PORT = Number(process.env.PORT ?? 3001)
 const PRODUCTION = process.argv.includes('--production') || process.env.NODE_ENV === 'production'
 /** Une partie sans hôte ni joueur connecté est supprimée après ce délai. */
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000
+/** Mot de passe demandé pour créer une partie (à définir dans les variables d'environnement de Render). */
+const HOST_PASSWORD = process.env.HOST_PASSWORD ?? ''
+
+function checkPassword(password: unknown): boolean {
+  if (!HOST_PASSWORD) return true
+  const digest = (v: string) => createHash('sha256').update(v).digest()
+  return typeof password === 'string' && timingSafeEqual(digest(password), digest(HOST_PASSWORD))
+}
+
+/**
+ * Limite les essais ratés (mot de passe ou code de partie) par adresse IP,
+ * pour qu'on ne puisse pas deviner en essayant au hasard.
+ */
+const MAX_FAILURES = 15
+const FAILURE_WINDOW_MS = 10 * 60 * 1000
+const failures = new Map<string, { count: number; since: number }>()
+
+function isBlocked(ip: string): boolean {
+  const entry = failures.get(ip)
+  if (!entry) return false
+  if (Date.now() - entry.since > FAILURE_WINDOW_MS) {
+    failures.delete(ip)
+    return false
+  }
+  return entry.count >= MAX_FAILURES
+}
+
+function recordFailure(ip: string): void {
+  const entry = failures.get(ip)
+  if (!entry || Date.now() - entry.since > FAILURE_WINDOW_MS) failures.set(ip, { count: 1, since: Date.now() })
+  else entry.count++
+}
+
+const TOO_MANY = 'Trop d’essais ratés. Réessaie dans quelques minutes.'
 
 interface Room {
   game: Game
@@ -34,16 +68,38 @@ interface SocketData {
 const rooms = new Map<string, Room>()
 
 const app = express()
+// Sur Render, l'adresse du visiteur est transmise par le proxy.
+app.set('trust proxy', 1)
+app.use(express.json({ limit: '10kb' }))
 const httpServer = createServer(app)
 const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer)
 
-/** Adresses IP de l'ordinateur sur le réseau local, pour que les téléphones puissent le rejoindre. */
+/**
+ * Configuration publique. En local, on donne aussi les adresses de l'ordinateur sur le Wi-Fi pour que
+ * les téléphones puissent le rejoindre (jamais en ligne).
+ */
 app.get('/api/info', (_req, res) => {
-  const addresses = Object.values(networkInterfaces())
-    .flat()
-    .filter((i) => i && i.family === 'IPv4' && !i.internal)
-    .map((i) => i!.address)
-  res.json({ lanAddresses: addresses })
+  const lanAddresses = PRODUCTION
+    ? []
+    : Object.values(networkInterfaces())
+        .flat()
+        .filter((i) => i && i.family === 'IPv4' && !i.internal)
+        .map((i) => i!.address)
+  res.json({ lanAddresses, hostPasswordRequired: HOST_PASSWORD !== '' })
+})
+
+app.post('/api/host-check', (req, res) => {
+  const ip = req.ip ?? 'inconnu'
+  if (isBlocked(ip)) {
+    res.status(429).json({ ok: false, error: TOO_MANY })
+    return
+  }
+  if (!checkPassword(req.body?.password)) {
+    recordFailure(ip)
+    res.status(401).json({ ok: false, error: 'Mot de passe incorrect.' })
+    return
+  }
+  res.json({ ok: true })
 })
 
 /** Extrait Deezer de la manche en cours (sans jamais révéler le morceau dans l'adresse). */
@@ -150,7 +206,14 @@ function sanitizeTracks(tracks: unknown): Track[] {
 }
 
 io.on('connection', (socket: GameSocket) => {
-  socket.on('host:create', async ({ tracks, totalRounds, mode }, ack) => {
+  const ip = String(socket.handshake.headers['x-forwarded-for'] ?? socket.handshake.address).split(',')[0].trim()
+
+  socket.on('host:create', async ({ tracks, totalRounds, mode, password }, ack) => {
+    if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
+    if (!checkPassword(password)) {
+      recordFailure(ip)
+      return ack({ ok: false, error: 'Mot de passe hôte incorrect.' })
+    }
     const clean = sanitizeTracks(tracks)
     if (clean.length === 0) return ack({ ok: false, error: 'La playlist ne contient aucun morceau jouable.' })
     const gameMode: GameMode = mode === 'deezer' ? 'deezer' : 'spotify'
@@ -218,8 +281,12 @@ io.on('connection', (socket: GameSocket) => {
   })
 
   socket.on('player:join', ({ code, name, playerId }, ack) => {
+    if (isBlocked(ip)) return ack({ ok: false, error: TOO_MANY })
     const room = rooms.get(String(code).toUpperCase().trim())
-    if (!room) return ack({ ok: false, error: "Ce code de partie n'existe pas." })
+    if (!room) {
+      recordFailure(ip)
+      return ack({ ok: false, error: "Ce code de partie n'existe pas." })
+    }
     const cleanName = String(name).trim().slice(0, 20)
     if (!cleanName) return ack({ ok: false, error: 'Choisis un pseudo.' })
     const id = String(playerId).slice(0, 64)
