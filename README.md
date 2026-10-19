@@ -10,7 +10,7 @@ Projet **privé entre amis**, pas destiné à être publié.
 
 ## 1. Principe du jeu
 
-1. Un joueur connecte son compte **Spotify Premium** et choisit une playlist.
+1. Un joueur connecte son compte **Spotify Premium** et choisit une playlist (ou ses titres likés).
 2. L'application tire un morceau au hasard dans la playlist.
 3. Elle joue un extrait très court (ex. 1 s). Les joueurs tentent de deviner le titre.
 4. À chaque mauvaise réponse (ou « passer »), l'extrait s'allonge : 1 s → 2 s → 4 s → 7 s → 11 s → 16 s.
@@ -124,7 +124,7 @@ les titres de la playlist.
 
 ### Version 1 — Mode soirée
 - [x] Connexion Spotify de l'hôte (OAuth PKCE)
-- [x] Choix d'une playlist : les siennes, ou un lien de playlist publique
+- [x] Choix d'une playlist : les siennes, ses titres likés, ou un lien de playlist publique
 - [x] Lecteur intégré sur l'ordinateur, extraits de durée croissante
 - [x] Création d'une partie avec code + QR code
 - [x] Les joueurs rejoignent depuis leur téléphone avec un pseudo

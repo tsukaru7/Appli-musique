@@ -10,6 +10,8 @@ const SCOPES = [
   'user-modify-playback-state',
   'playlist-read-private',
   'playlist-read-collaborative',
+  // Titres likés
+  'user-library-read',
 ]
 
 const TOKEN_KEY = 'spotifyToken'

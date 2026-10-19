@@ -2704,3 +2704,11 @@ a {
 .who-lobby > * {
   min-width: 0;
 }
+
+/* Titres likés : même tuile qu'une playlist, avec un cœur */
+.playlist-cover.liked-cover {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #4a2bd6, #a596f2);
+  color: #fff;
+}

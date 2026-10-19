@@ -116,6 +116,7 @@ const ICONS = {
       <path d="M20 16.5V7l2 1" />
     </>
   ),
+  heart: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" fill="currentColor" stroke="none" />,
 } satisfies Record<string, ReactNode>
 
 export type IconName = keyof typeof ICONS

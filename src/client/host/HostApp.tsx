@@ -28,7 +28,16 @@ import {
 } from '../components.tsx'
 import { DeezerRound, GuessInput, RoundHeader, WrongGuesses, useWrongGuesses } from '../player/PlayerApp.tsx'
 import { createPlayerSocket, socket, SocketContext, type GameSocket } from '../socket.ts'
-import { getMe, getMyPlaylists, getPlaylist, getPlaylistTracks, parsePlaylistId, type PlaylistSummary } from '../spotify/api.ts'
+import {
+  getLikedCount,
+  getLikedTracks,
+  getMe,
+  getMyPlaylists,
+  getPlaylist,
+  getPlaylistTracks,
+  parsePlaylistId,
+  type PlaylistSummary,
+} from '../spotify/api.ts'
 import { isLoggedIn, login, logout } from '../spotify/auth.ts'
 import { SnippetPlayer } from '../spotify/player.ts'
 import { PreviewPlayer } from '../preview.ts'
@@ -1101,18 +1110,32 @@ function PlaylistChooser({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  /** Nombre de titres likés ; null : il faut se reconnecter pour y donner accès ; undefined : chargement. */
+  const [likedCount, setLikedCount] = useState<number | null | undefined>(undefined)
+
   useEffect(() => {
     getMyPlaylists()
       .then(setPlaylists)
       .catch((err) => setError(err.message))
+    getLikedCount()
+      .then(setLikedCount)
+      .catch(() => setLikedCount(0))
   }, [])
 
-  const choose = async (id: string, name?: string) => {
+  const choose = (id: string, name?: string) => start(() => getPlaylistTracks(id), name ?? 'la playlist')
+
+  const chooseLiked = () => {
+    // Connexion faite avant l'ajout des titres likés : Spotify doit redemander l'autorisation.
+    if (likedCount === null) return login()
+    return start(getLikedTracks, 'tes titres likés')
+  }
+
+  const start = async (load: () => Promise<Track[]>, label: string) => {
     setError(null)
-    setBusy(`Chargement de ${name ?? 'la playlist'}…`)
+    setBusy(`Chargement de ${label}…`)
     try {
-      const tracks = await getPlaylistTracks(id)
-      if (tracks.length < 3) throw new Error('Cette playlist contient trop peu de morceaux jouables.')
+      const tracks = await load()
+      if (tracks.length < 3) throw new Error('Il y a trop peu de morceaux jouables ici.')
       if (audio === 'deezer') setBusy('Recherche des extraits sur Deezer…')
       await onCreate({ tracks }, rounds)
     } catch (err) {
@@ -1160,6 +1183,19 @@ function PlaylistChooser({
         <p className="muted">Chargement de tes playlists…</p>
       ) : (
         <div className="playlist-grid">
+          <button className="playlist" disabled={busy !== null || likedCount === 0} onClick={chooseLiked}>
+            <span className="playlist-cover liked-cover">
+              <Icon name="heart" size={44} />
+            </span>
+            <span className="playlist-name">Titres likés</span>
+            <span className="playlist-meta">
+              {likedCount === undefined
+                ? '…'
+                : likedCount === null
+                  ? 'Reconnecte Spotify pour y accéder'
+                  : `${likedCount} titres`}
+            </span>
+          </button>
           {playlists?.map((p) => (
             <button key={p.id} className="playlist" disabled={busy !== null} onClick={() => choose(p.id, p.name)}>
               <span className="playlist-cover">{p.image && <Cover src={p.image} />}</span>

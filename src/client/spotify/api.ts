@@ -131,12 +131,18 @@ export async function getPlaylistTracks(id: string): Promise<Track[]> {
     if (!(err instanceof SpotifyError) || err.status !== 404) throw err
     entries = await fetchAll<ApiPlaylistEntry>(`/playlists/${id}/tracks?limit=50&additional_types=track&market=from_token`)
   }
+  return toTracks(entries.map((entry) => entry.item ?? entry.track))
+}
+
+/** Morceaux jouables (sans les épisodes de podcast, les fichiers locaux ni les morceaux grisés). */
+function toTracks(items: (ApiTrack | null | undefined)[]): Track[] {
   const tracks: Track[] = []
-  for (const entry of entries) {
-    const t = entry.item ?? entry.track
-    if (!t || !t.id || t.is_local || (t.type && t.type !== 'track')) continue
+  const seen = new Set<string>()
+  for (const t of items) {
+    if (!t || !t.id || t.is_local || (t.type && t.type !== 'track') || seen.has(t.id)) continue
     // Morceau grisé dans Spotify : il ne se lancerait jamais.
     if (t.is_playable === false) continue
+    seen.add(t.id)
     const images = t.album?.images ?? []
     tracks.push({
       id: t.id,
@@ -148,6 +154,23 @@ export async function getPlaylistTracks(id: string): Promise<Track[]> {
     })
   }
   return tracks
+}
+
+/** Nombre de titres likés (null si la connexion Spotify ne donne pas encore accès aux titres likés). */
+export async function getLikedCount(): Promise<number | null> {
+  try {
+    const page = await spotifyFetch<{ total?: number }>('/me/tracks?limit=1')
+    return page.total ?? 0
+  } catch (err) {
+    if (err instanceof SpotifyError && (err.status === 401 || err.status === 403)) return null
+    throw err
+  }
+}
+
+/** Titres likés (les 2 000 plus récents au maximum). */
+export async function getLikedTracks(): Promise<Track[]> {
+  const entries = await fetchAll<{ track?: ApiTrack | null }>('/me/tracks?limit=50&market=from_token', 2000)
+  return toTracks(entries.map((entry) => entry.track))
 }
 
 /** Extrait l'identifiant d'une playlist depuis un lien (open.spotify.com/playlist/…) ou un URI. */
