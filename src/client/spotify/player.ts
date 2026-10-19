@@ -1,6 +1,7 @@
 // Lecteur Spotify dans le navigateur (Web Playback SDK) : ne fonctionne que sur ordinateur, avec Premium.
 import { SpotifyError, spotifyFetch } from './api.ts'
 import { getAccessToken } from './auth.ts'
+import { preciseSleep, preciseTimeout } from '../timers.ts'
 
 interface PlaybackState {
   paused: boolean
@@ -49,8 +50,6 @@ function loadSdk(): Promise<void> {
   })
   return sdkLoading
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const VOLUME = 0.8
 
@@ -126,7 +125,7 @@ export class SnippetPlayer {
     while (performance.now() < end) {
       const state = await this.player.getCurrentState()
       if (state && check(state)) return state
-      await sleep(30)
+      await preciseSleep(30)
     }
     return null
   }
@@ -261,7 +260,7 @@ export class SnippetPlayer {
   async playSnippet(uri: string, durationMs: number, onStart?: () => void, startMs = 0): Promise<void> {
     const id = ++this.playId
     // Filet de sécurité : même si quelque chose bloque, le son est coupé.
-    const safety = setTimeout(() => {
+    const cancelSafety = preciseTimeout(() => {
       if (id === this.playId) this.forcePause()
     }, durationMs + 12000)
     try {
@@ -283,9 +282,10 @@ export class SnippetPlayer {
       const played = Math.max(0, state.position - startMs)
       const end = performance.now() + durationMs - played - sinceMeasure
       // Attente découpée, pour s'arrêter tout de suite si un autre extrait est lancé entre-temps.
-      while (id === this.playId && performance.now() < end) await sleep(Math.min(50, end - performance.now()))
+      // (minuteur qui n'est pas ralenti quand on change de fenêtre ou d'onglet)
+      while (id === this.playId && performance.now() < end) await preciseSleep(Math.min(50, end - performance.now()))
     } finally {
-      clearTimeout(safety)
+      cancelSafety()
       if (id === this.playId) await this.forcePause()
     }
   }

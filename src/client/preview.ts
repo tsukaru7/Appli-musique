@@ -1,5 +1,6 @@
 // Lecture des extraits Deezer (servis par notre serveur) : début du son repéré, coupure précise.
 import { detectSoundStart } from './audio.ts'
+import { preciseTimeout } from './timers.ts'
 
 /** Télécharge l'extrait (25 s maximum par essai), avec un second essai si le premier échoue. */
 async function download(url: string): Promise<ArrayBuffer> {
@@ -20,7 +21,8 @@ export class PreviewPlayer {
   private url: string | null = null
   private blobUrl: string | null = null
   private loading: Promise<void> | null = null
-  private frame = 0
+  /** Annule la surveillance de la fin de l'extrait en cours. */
+  private cancelWatch: () => void = () => {}
   /** Moment où le son commence vraiment dans l'extrait (le silence du début est sauté). */
   private soundStart = 0
 
@@ -60,11 +62,15 @@ export class PreviewPlayer {
     this.audio.currentTime = start
     await this.audio.play()
     onStart?.()
-    const tick = () => {
-      if (this.audio.paused || (this.audio.currentTime - start) * 1000 >= durationMs) this.audio.pause()
-      else this.frame = requestAnimationFrame(tick)
+    // On regarde où en est le son (pas une horloge) pour couper pile à la fin, même onglet caché.
+    const end = start + durationMs / 1000
+    const watch = () => {
+      if (this.audio.paused) return
+      const leftMs = (end - this.audio.currentTime) * 1000
+      if (leftMs <= 4) return this.audio.pause()
+      this.cancelWatch = preciseTimeout(watch, Math.min(leftMs - 2, 40))
     }
-    tick()
+    watch()
   }
 
   /** Révélation : l'extrait entier. */
@@ -76,7 +82,7 @@ export class PreviewPlayer {
   }
 
   stop(): void {
-    cancelAnimationFrame(this.frame)
+    this.cancelWatch()
     this.audio.pause()
   }
 
