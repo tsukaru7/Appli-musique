@@ -20,6 +20,24 @@ interface Player {
   connected: boolean
 }
 
+/** Sauvegarde d'une partie « Qui a mis ce son ? » (voir GameSnapshot). */
+export interface WhoGameSnapshot {
+  base: { code: string; perPlayer: number }
+  state: {
+    phase: Phase
+    players: Player[]
+    totalRounds: number
+    roundNumber: number
+    current?: Track
+    submissions: [string, Track[]][]
+    owners: [string, string][]
+    order: Track[]
+    votes: [string, string][]
+    points: [string, number][]
+    roundStartedAt: number
+  }
+}
+
 export interface WhoGameOptions {
   random?: () => number
   now?: () => number
@@ -59,6 +77,41 @@ export class WhoGame {
     this.perPlayer = Math.min(WHO_MAX_PER_PLAYER, Math.max(1, Math.round(perPlayer)))
     this.random = options.random ?? Math.random
     this.now = options.now ?? Date.now
+  }
+
+  snapshot(): WhoGameSnapshot {
+    return {
+      base: { code: this.code, perPlayer: this.perPlayer },
+      state: {
+        phase: this.phase,
+        players: [...this.players.values()].map((p) => ({ ...p })),
+        totalRounds: this.totalRounds,
+        roundNumber: this.roundNumber,
+        current: this.current,
+        submissions: [...this.submissions],
+        owners: [...this.owners],
+        order: this.order,
+        votes: [...this.votes],
+        points: [...this.points],
+        roundStartedAt: this.roundStartedAt,
+      },
+    }
+  }
+
+  static restore({ base, state }: WhoGameSnapshot, options: WhoGameOptions = {}): WhoGame {
+    const game = new WhoGame(base.code, base.perPlayer, options)
+    game.phase = state.phase
+    for (const p of state.players) game.players.set(p.id, { ...p, connected: false })
+    game.totalRounds = state.totalRounds
+    game.roundNumber = state.roundNumber
+    game.current = state.current
+    for (const [id, tracks] of state.submissions) game.submissions.set(id, tracks)
+    for (const [track, owner] of state.owners) game.owners.set(track, owner)
+    game.order = state.order
+    game.votes = new Map(state.votes)
+    game.points = new Map(state.points)
+    game.roundStartedAt = state.roundStartedAt
+    return game
   }
 
   join(id: string, name: string, avatar: string = defaultAvatar(id)): void {

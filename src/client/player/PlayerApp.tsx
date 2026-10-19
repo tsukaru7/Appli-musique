@@ -145,13 +145,36 @@ export function PlayerApp() {
     }
   }, [])
 
-  // Après une coupure réseau, on se reconnecte automatiquement à la partie.
+  // Après une coupure réseau, on se reconnecte automatiquement à la partie. Si le serveur a redémarré,
+  // la partie revient dès que la page de l'hôte l'a reprise : on réessaie pendant une minute.
+  const [waitingHost, setWaitingHost] = useState(false)
   useEffect(() => {
     if (!joined) return
-    const rejoin = () =>
-      socket.emit('player:join', { code: code.toUpperCase().trim(), name, playerId: id, avatar }, () => {})
+    let retry: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    const rejoin = () => {
+      clearTimeout(retry)
+      socket.emit('player:join', { code: code.toUpperCase().trim(), name, playerId: id, avatar }, (res) => {
+        if (res.ok) {
+          attempts = 0
+          setWaitingHost(false)
+          return
+        }
+        if (++attempts < 40) {
+          setWaitingHost(true)
+          retry = setTimeout(rejoin, 1500)
+          return
+        }
+        setWaitingHost(false)
+        localStorage.removeItem(SESSION_KEY)
+        setJoined(false)
+        setRoom(null)
+        setError("La partie n'existe plus. Demande le nouveau code à l'hôte.")
+      })
+    }
     socket.on('connect', rejoin)
     return () => {
+      clearTimeout(retry)
       socket.off('connect', rejoin)
     }
   }, [joined, code, name, id, avatar])
@@ -201,6 +224,11 @@ export function PlayerApp() {
       </header>
 
       <main className="page">
+        {waitingHost && (
+          <p className="notice restored-notice" role="status">
+            Connexion perdue avec la partie : on attend que l'écran de l'hôte la reprenne…
+          </p>
+        )}
         {room.kind === 'whois' && room.phase === 'lobby' && <WhoLobby room={room} playerId={id} mine={mine} onMine={setMine} />}
         {room.kind === 'whois' && room.phase === 'playing' && <WhoVote room={room} playerId={id} yours={yours} />}
         {room.kind === 'whois' && room.phase === 'reveal' && <WhoPhoneReveal room={room} playerId={id} />}

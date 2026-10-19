@@ -6,6 +6,7 @@ import {
   type AnswerOption,
   type AudioSource,
   type GameMode,
+  type HostSnapshot,
   type RoomView,
   type Track,
 } from '../../shared/protocol.ts'
@@ -46,6 +47,35 @@ import { WhoReveal, WhoRound, WhoSetup } from './WhoHost.tsx'
 import { findPack, PACKS } from '../../shared/packs/index.ts'
 
 const SESSION_KEY = 'hostSession'
+/** Sauvegarde chiffrée de la partie en cours (donnée par le serveur), pour la reprendre s'il redémarre. */
+const SNAPSHOT_KEY = 'hostSnapshot'
+
+function readSnapshot(code: string): HostSnapshot | undefined {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) ?? 'null') as (HostSnapshot & { code: string }) | null
+    return saved?.code === code && saved.base && saved.state ? { base: saved.base, state: saved.state } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function saveSnapshot(code: string, part: { base?: string; state: string }): void {
+  try {
+    const previous = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) ?? 'null') as (HostSnapshot & { code: string }) | null
+    const base = part.base ?? (previous?.code === code ? previous.base : undefined)
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ code, base, state: part.state }))
+  } catch {
+    // stockage plein ou indisponible : la partie ne pourra simplement pas être reprise
+  }
+}
+
+function clearSnapshot(): void {
+  try {
+    localStorage.removeItem(SNAPSHOT_KEY)
+  } catch {
+    // rien à faire
+  }
+}
 const PASSWORD_KEY = 'hostPassword'
 const LAST_STAGE = SNIPPET_DURATIONS_MS.length - 1
 
@@ -327,21 +357,30 @@ function Host({
     const onConnect = () => {
       const s = readSession()
       if (!s) return
-      socket.emit('host:resume', s, (res) => {
+      socket.emit('host:resume', { ...s, snapshot: readSnapshot(s.code) }, (res) => {
         if (!res.ok) {
           localStorage.removeItem(SESSION_KEY)
+          clearSnapshot()
           setSession(null)
           setRoom(null)
+          return
         }
+        if (res.restored) setRestoredNotice(true)
       })
     }
     const onTrack = (payload: { track: Track; stage: number }) => setCurrent(payload)
+    const onSnapshot = (part: { base?: string; state: string }) => {
+      const s = readSession()
+      if (s) saveSnapshot(s.code, part)
+    }
     socket.on('connect', onConnect)
+    socket.on('host:snapshot', onSnapshot)
     socket.on('room:update', setRoom)
     socket.on('host:track', onTrack)
     if (socket.connected) onConnect()
     return () => {
       socket.off('connect', onConnect)
+      socket.off('host:snapshot', onSnapshot)
       socket.off('room:update', setRoom)
       socket.off('host:track', onTrack)
     }
@@ -443,6 +482,13 @@ function Host({
   }, [phase, roomCode, roundNumber, audio, player, current, preview, isWhois])
 
   const [confirmQuit, setConfirmQuit] = useState(false)
+  /** La partie vient d'être reprise après un redémarrage du serveur. */
+  const [restoredNotice, setRestoredNotice] = useState(false)
+  useEffect(() => {
+    if (!restoredNotice) return
+    const timer = setTimeout(() => setRestoredNotice(false), 8000)
+    return () => clearTimeout(timer)
+  }, [restoredNotice])
 
   /** Ferme la partie (les joueurs sont prévenus) et revient à l'accueil. */
   const newGame = () => {
@@ -451,6 +497,7 @@ function Host({
     setConfirmQuit(false)
     setShowHome(true)
     localStorage.removeItem(SESSION_KEY)
+    clearSnapshot()
     setSession(null)
     setRoom(null)
     setCurrent(null)
@@ -549,6 +596,11 @@ function Host({
       )}
 
       <main className="page">
+        {restoredNotice && room && (
+          <p className="notice restored-notice" role="status">
+            Le serveur a redémarré : la partie a été reprise là où elle en était.
+          </p>
+        )}
         {(!session || !room) && showHome ? (
           <HomeScreen
             onChoose={(value) => {
@@ -1350,12 +1402,22 @@ function useSoloPlayer(
     }
     const playerSocket = createPlayerSocket()
     const playerId = id
-    const join = () =>
+    let retry: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    const join = () => {
+      clearTimeout(retry)
       playerSocket.emit('player:join', { code, name: nameRef.current || 'Moi', playerId }, (res) => {
-        if (res.ok) setState({ socket: playerSocket, id: playerId, options: res.options })
+        if (res.ok) {
+          attempts = 0
+          return setState({ socket: playerSocket, id: playerId, options: res.options })
+        }
+        // Serveur redémarré : la partie revient dès que la page de l'hôte l'a reprise.
+        if (++attempts < 30) retry = setTimeout(join, 1500)
       })
+    }
     playerSocket.on('connect', join)
     return () => {
+      clearTimeout(retry)
       playerSocket.off('connect', join)
       playerSocket.disconnect()
       setState(null)

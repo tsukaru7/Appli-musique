@@ -22,8 +22,9 @@ import {
   searchTracks,
   type DeezerMatch,
 } from './deezer.ts'
-import { Game, type Change } from './game.ts'
-import { WhoGame } from './whogame.ts'
+import { Game, type Change, type GameSnapshot } from './game.ts'
+import { WhoGame, type WhoGameSnapshot } from './whogame.ts'
+import { seal, unseal } from './snapshot.ts'
 import { findPack, packOfTrack } from '../shared/packs/index.ts'
 import { findWorkImage, getPackArt } from './images.ts'
 import { defaultAvatar, isAvatar } from '../shared/avatars.ts'
@@ -79,6 +80,65 @@ interface Room {
   /** Pochettes Deezer des morceaux trouvés (image de secours pour la révélation). */
   covers: Map<string, string>
   previews: Map<number, Promise<Buffer>>
+  /** La partie de la sauvegarde (les morceaux) a déjà été envoyée à l'hôte connecté. */
+  baseSent?: boolean
+}
+
+interface SnapshotBase {
+  v: 1
+  kind: 'blindtest' | 'whois'
+  hostKey: string
+  game: GameSnapshot['base'] | WhoGameSnapshot['base']
+}
+
+interface SnapshotState {
+  v: 1
+  code: string
+  game: GameSnapshot['state'] | WhoGameSnapshot['state']
+  deezerIds: [string, number][]
+  covers: [string, string][]
+}
+
+/** Envoie à l'hôte la sauvegarde de sa partie (les morceaux une seule fois, l'état à chaque fois). */
+function sendSnapshot(room: Room): void {
+  if (!room.hostSocketId) return
+  const snapshot = room.game.snapshot()
+  const state: SnapshotState = {
+    v: 1,
+    code: room.game.code,
+    game: snapshot.state,
+    deezerIds: [...room.deezerIds],
+    covers: [...room.covers],
+  }
+  let base: string | undefined
+  if (!room.baseSent) {
+    const value: SnapshotBase = { v: 1, kind: room.game.kind, hostKey: room.hostKey, game: snapshot.base }
+    base = seal(value)
+    room.baseSent = true
+  }
+  io.to(room.hostSocketId).emit('host:snapshot', { base, state: seal(state) })
+}
+
+/** Recrée une partie perdue (serveur redémarré) depuis la sauvegarde gardée par l'hôte. */
+function restoreRoom(code: string, hostKey: string, snapshot: { base?: unknown; state?: unknown }): Room | null {
+  const base = unseal<SnapshotBase>(snapshot.base)
+  const state = unseal<SnapshotState>(snapshot.state)
+  if (!base || !state || base.v !== 1 || state.v !== 1 || state.code !== code || base.hostKey !== hostKey) return null
+  if (base.game.code !== code || rooms.has(code)) return null
+  const game =
+    base.kind === 'whois'
+      ? WhoGame.restore({ base: base.game, state: state.game } as WhoGameSnapshot)
+      : Game.restore({ base: base.game, state: state.game } as GameSnapshot)
+  const answerTracks = game instanceof Game ? (base.game as GameSnapshot['base']).answerTracks : []
+  return {
+    game,
+    hostKey,
+    options: buildAnswerOptions(answerTracks),
+    lastActivity: Date.now(),
+    deezerIds: new Map(state.deezerIds),
+    covers: new Map(state.covers),
+    previews: new Map(),
+  }
 }
 
 interface SocketData {
@@ -378,6 +438,7 @@ function newCode(): string {
 function broadcast(room: Room): void {
   room.lastActivity = Date.now()
   io.to(room.game.code).emit('room:update', room.game.view())
+  sendSnapshot(room)
 }
 
 /** Après une action : met tout le monde à jour et, si besoin, donne à l'hôte le morceau à jouer. */
@@ -552,13 +613,25 @@ io.on('connection', (socket: GameSocket) => {
     broadcast(room)
   })
 
-  socket.on('host:resume', ({ code, hostKey }, ack) => {
-    const room = rooms.get(code)
+  socket.on('host:resume', ({ code, hostKey, snapshot }, ack) => {
+    let room = rooms.get(code)
+    let restored = false
+    // Serveur redémarré : la partie n'existe plus ici, on la recrée depuis la sauvegarde de l'hôte.
+    if (!room && snapshot && typeof code === 'string' && typeof hostKey === 'string') {
+      const copy = restoreRoom(code, hostKey, snapshot)
+      if (copy) {
+        rooms.set(code, copy)
+        room = copy
+        restored = true
+        console.log(`Partie ${code} reprise depuis la sauvegarde de l'hôte`)
+      }
+    }
     if (!room || room.hostKey !== hostKey) return ack({ ok: false, error: 'Partie introuvable.' })
     room.hostSocketId = socket.id
+    room.baseSent = restored
     socket.data = { code, role: 'host' }
     socket.join(code)
-    ack({ ok: true })
+    ack({ ok: true, restored })
     afterChange(room, { playNext: room.game.phase === 'playing' && room.game.mode === 'spotify' })
   })
 

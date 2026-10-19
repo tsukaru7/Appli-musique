@@ -80,6 +80,12 @@ export interface WhoSearchResult {
 /** Quel jeu : blind test (deviner le titre ou l'œuvre) ou « Qui a mis ce son ? ». */
 export type GameKind = 'blindtest' | 'whois'
 
+/** Sauvegarde chiffrée d'une partie (illisible pour l'hôte) : morceaux d'un côté, état de l'autre. */
+export interface HostSnapshot {
+  base: string
+  state: string
+}
+
 /** État propre à « Qui a mis ce son ? ». */
 export interface WhoView {
   /** Nombre de morceaux que chaque joueur doit ajouter. */
@@ -132,7 +138,10 @@ export interface ClientToServerEvents {
     },
     ack: (res: { ok: true; code: string; hostKey: string } | { ok: false; error: string }) => void,
   ) => void
-  'host:resume': (payload: { code: string; hostKey: string }, ack: (res: { ok: boolean; error?: string }) => void) => void
+  'host:resume': (
+    payload: { code: string; hostKey: string; snapshot?: HostSnapshot },
+    ack: (res: { ok: boolean; error?: string; restored?: boolean }) => void,
+  ) => void
   'host:start': () => void
   'host:nextStage': () => void
   'host:reveal': () => void
@@ -171,6 +180,8 @@ export interface ServerToClientEvents {
   'room:closed': () => void
   /** « Qui a mis ce son ? » : les morceaux choisis par ce joueur (lui seul les reçoit). */
   'whois:mine': (payload: { tracks: Track[] }) => void
+  /** Sauvegarde chiffrée de la partie, gardée par l'hôte (pour la reprendre si le serveur redémarre). */
+  'host:snapshot': (payload: { base?: string; state: string }) => void
   /** « Qui a mis ce son ? » : le morceau de cette manche est le tien. */
   'whois:yours': (payload: { roundNumber: number }) => void
 }

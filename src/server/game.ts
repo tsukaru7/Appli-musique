@@ -44,6 +44,32 @@ export interface GameOptions {
   random?: () => number
 }
 
+/**
+ * Sauvegarde d'une partie, pour la reprendre si le serveur redémarre. `base` ne change pas pendant la
+ * partie (les morceaux : envoyée une fois), `state` change à chaque action (gardée petite).
+ */
+export interface GameSnapshot {
+  base: {
+    code: string
+    mode: GameMode
+    solo: boolean
+    audio: AudioSource
+    packs: string[]
+    totalRounds: number
+    tracks: Track[]
+    answerTracks: Track[]
+  }
+  state: {
+    phase: Phase
+    players: Player[]
+    roundNumber: number
+    stage: number
+    current?: Track
+    usedKeys: string[]
+    rounds: [string, PlayerRound][]
+  }
+}
+
 /** Ce qui a changé après une action, pour que le serveur sache quoi envoyer. */
 export interface Change {
   /** Le morceau ou le palier a changé : l'hôte doit recevoir le morceau et jouer le nouvel extrait. */
@@ -64,6 +90,7 @@ export interface GuessResult {
  * débloque l'extrait suivant, comme dans Songless.
  */
 export class Game {
+  readonly kind = 'blindtest' as const
   readonly code: string
   readonly mode: GameMode
   readonly solo: boolean
@@ -93,6 +120,50 @@ export class Game {
     const uniqueCount = new Set(tracks.map(trackKey)).size
     this.totalRounds = Math.max(1, Math.min(totalRounds, uniqueCount))
     this.random = options.random ?? Math.random
+  }
+
+  snapshot(): GameSnapshot {
+    return {
+      base: {
+        code: this.code,
+        mode: this.mode,
+        solo: this.solo,
+        audio: this.audio,
+        packs: this.packs,
+        totalRounds: this.totalRounds,
+        tracks: this.tracks,
+        answerTracks: [...this.tracksById.values()],
+      },
+      state: {
+        phase: this.phase,
+        players: [...this.players.values()].map((p) => ({ ...p })),
+        roundNumber: this.roundNumber,
+        stage: this.stage,
+        current: this.current,
+        usedKeys: [...this.usedKeys],
+        rounds: [...this.rounds].map(([id, r]) => [id, { ...r }]),
+      },
+    }
+  }
+
+  /** Recrée une partie depuis sa sauvegarde (les joueurs sont marqués déconnectés jusqu'à leur retour). */
+  static restore({ base, state }: GameSnapshot, random?: () => number): Game {
+    const game = new Game(base.code, base.tracks, base.totalRounds, {
+      mode: base.mode,
+      solo: base.solo,
+      audio: base.audio,
+      packs: base.packs,
+      answerTracks: base.answerTracks,
+      random,
+    })
+    game.phase = state.phase
+    for (const p of state.players) game.players.set(p.id, { ...p, connected: false })
+    game.roundNumber = state.roundNumber
+    game.stage = state.stage
+    game.current = state.current
+    for (const key of state.usedKeys) game.usedKeys.add(key)
+    game.rounds = new Map(state.rounds)
+    return game
   }
 
   join(id: string, name: string, avatar: string = defaultAvatar(id)): void {

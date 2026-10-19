@@ -2712,3 +2712,9 @@ a {
   background: linear-gradient(135deg, #4a2bd6, #a596f2);
   color: #fff;
 }
+
+/* Partie reprise après un redémarrage du serveur */
+.restored-notice {
+  margin-bottom: 16px;
+  border: 1px solid var(--line-strong);
+}
